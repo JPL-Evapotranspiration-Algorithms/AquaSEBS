@@ -1,8 +1,8 @@
 # AquaSEBS
 
 [![CI](https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS/actions/workflows/ci.yml/badge.svg)](https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS/actions/workflows/ci.yml)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI version](https://badge.fury.io/py/AquaSEBS.svg)](https://badge.fury.io/py/AquaSEBS)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **AquaSEBS** is a Python implementation of the Abdelrady et al. (2016) and Fisher et al. (2023) methodology for estimating water surface evaporation and energy balance components over freshwater and saline water bodies using satellite remote sensing data and meteorological inputs. The package implements the AquaSEBS (Aquatic Surface Energy Balance System) model, which combines Abdelrady et al.'s equilibrium temperature model for water heat flux with Fisher et al.'s adaptation for complete evaporation estimation using the Priestley-Taylor approach.
