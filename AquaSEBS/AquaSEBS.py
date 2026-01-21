@@ -14,6 +14,7 @@ from priestley_taylor import priestley_taylor
 from daylight_evapotranspiration import daylight_ET_from_instantaneous_LE
 
 from .constants import *
+from .exceptions import *
 
 from .water_heat_flux import water_heat_flux
 
@@ -41,7 +42,8 @@ def AquaSEBS(
         γ_Pa: Union[Raster, np.ndarray, float] = GAMMA_PA,
         resampling: str = RESAMPLING_METHOD,
         upscale_to_daylight: bool = UPSCALE_TO_DAYLIGHT,
-        mask_non_water_pixels: bool = MASK_NON_WATER_PIXELS) -> Dict[str, Union[Raster, np.ndarray, float]]:
+        mask_non_water_pixels: bool = MASK_NON_WATER_PIXELS,
+        offline_mode: bool = False) -> Dict[str, Union[Raster, np.ndarray, float]]:
         # If geometry is not provided, try to infer from surface temperature raster
     results = {}
 
@@ -63,6 +65,9 @@ def AquaSEBS(
 
     # Retrieve air temperature if not provided, using GEOS5FP and geometry/time
     if Ta_C is None and geometry is not None and time_UTC is not None:
+        if offline_mode:
+            raise MissingOfflineParameter("offline mode is enabled but Ta_C is not provided")
+        
         Ta_C = GEOS5FP_connection.Ta_C(
             time_UTC=time_UTC,
             geometry=geometry,
@@ -75,6 +80,9 @@ def AquaSEBS(
     if Rn_Wm2 is None and albedo is not None and WST_C is not None and emissivity is not None and geometry is not None and time_UTC is not None:
         # Retrieve incoming shortwave if not provided
         if SWin_Wm2 is None and geometry is not None and time_UTC is not None:
+            if offline_mode:
+                raise MissingOfflineParameter("offline mode is enabled but SWin_Wm2 is not provided")
+        
             SWin_Wm2 = GEOS5FP_connection.SWin(
                 time_UTC=time_UTC,
                 geometry=geometry,
@@ -94,7 +102,8 @@ def AquaSEBS(
             geometry=geometry,
             time_UTC=time_UTC,
             resampling=resampling,
-            GEOS5FP_connection=GEOS5FP_connection
+            GEOS5FP_connection=GEOS5FP_connection,
+            offline_mode=offline_mode
         )
 
         Rn_Wm2 = Rn_results["Rn_Wm2"]
