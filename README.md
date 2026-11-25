@@ -2,7 +2,8 @@
 
 **AquaSEBS** (Aquatic Surface Energy Balance System) is a Python implementation of the Abdelrady et al. (2016) and Fisher et al. (2023) methodology for estimating water surface evaporation and energy balance components over open water bodies using satellite remote sensing data and meteorological inputs. Developed and implemented by **Gregory H. Halverson** at NASA's Jet Propulsion Laboratory for the **ECOSTRESS** mission—and globally validated across 19 open-water sites by **Fisher et al. (2023)**—the package combines Abdelrady et al.'s Equilibrium Temperature Model (ETM) for water heat flux with the energy-limited Priestley–Taylor approach for open-water evaporation.
 
-**Author:** Gregory H. Halverson (they/them) — [gregory.h.halverson@jpl.nasa.gov](mailto:gregory.h.halverson@jpl.nasa.gov) — NASA Jet Propulsion Laboratory 321H
+**Author:** Gregory H. Halverson (they/them) ([gregory.h.halverson@jpl.nasa.gov](mailto:gregory.h.halverson@jpl.nasa.gov))<br>
+NASA Jet Propulsion Laboratory 321H<br>
 
 ## Citation
 
