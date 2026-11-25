@@ -1,555 +1,26 @@
 # AquaSEBS Water Surface Evaporation Python Package
 
-[![CI](https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS/actions/workflows/ci.yml/badge.svg)](https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS/actions/workflows/ci.yml)
-[![PyPI version](https://badge.fury.io/py/AquaSEBS.svg)](https://badge.fury.io/py/AquaSEBS)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+**AquaSEBS** (Aquatic Surface Energy Balance System) is a Python implementation of the Abdelrady et al. (2016) and Fisher et al. (2023) methodology for estimating water surface evaporation and energy balance components over open water bodies using satellite remote sensing data and meteorological inputs. Developed and implemented by **Gregory H. Halverson** at NASA's Jet Propulsion Laboratory for the **ECOSTRESS** mission—and globally validated across 19 open-water sites by **Fisher et al. (2023)**—the package combines Abdelrady et al.'s Equilibrium Temperature Model (ETM) for water heat flux with the energy-limited Priestley–Taylor approach for open-water evaporation.
 
-**AquaSEBS** is a Python implementation of the Abdelrady et al. (2016) and Fisher et al. (2023) methodology for estimating water surface evaporation and energy balance components over freshwater and saline water bodies using satellite remote sensing data and meteorological inputs. The package implements the AquaSEBS (Aquatic Surface Energy Balance System) model, which combines Abdelrady et al.'s equilibrium temperature model for water heat flux with Fisher et al.'s adaptation for complete evaporation estimation using the Priestley-Taylor approach.
-
-Gregory H. Halverson (they/them)<br>
-[gregory.h.halverson@jpl.nasa.gov](mailto:gregory.h.halverson@jpl.nasa.gov)<br>
-NASA Jet Propulsion Laboratory 329G
-
-## Overview
-
-This package implements the **Abdelrady et al. (2016) and Fisher et al. (2023) combined methodology** for physics-based estimation of:
-- **Latent heat flux (evaporation)** using Priestley-Taylor equation (Fisher et al., 2023 adaptation)
-- **Water heat flux** using equilibrium temperature model (Abdelrady et al., 2016)
-- **Net radiation components** using Verma et al. method
-
-The implementation follows the Abdelrady et al. (2016) formulations for water heat flux exactly, combined with Fisher et al. (2023) adaptations for complete evaporation estimation, accounting for the effects of water salinity on evaporation rates.
-
-## Key Features
-
-- **Combined methodology**: Integrates Abdelrady et al. (2016) water heat flux with Fisher et al. (2023) evaporation framework
-- **Faithful implementation**: Exact reproduction of Abdelrady et al. (2016) equations and coefficients for water heat flux
-- **Remote sensing optimized**: Follows Fisher et al. (2023) adaptations for satellite-based evaporation estimation
-- **Multi-source data integration**: Combines satellite remote sensing data with meteorological inputs
-- **Salinity correction**: Implements Turk (1970) salinity reduction factor as specified in original methodology
-- **Automated data retrieval**: Integrates with GEOS-5 FP and NASADEM for meteorological and topographic data
-- **Flexible input handling**: Supports both raster and array data formats
-- **Water masking**: Automatically identifies water bodies using NASADEM surface water body extent
-
-## Scientific Background and Methodology
-
-This package is a faithful Python implementation combining the **Abdelrady et al. (2016) water heat flux methodology** with the **Fisher et al. (2023) remote sensing evaporation approach**. Abdelrady et al. developed the equilibrium temperature model for water heat flux calculation, while Fisher et al. adapted and integrated this with the Priestley-Taylor equation for complete evaporation estimation from satellite data. The water heat flux equations, coefficients, and computational steps follow the original Abdelrady et al. (2016) publication exactly, while the overall evaporation framework follows Fisher et al. (2023).
-
-### Theoretical Foundation
-
-The surface energy balance for water bodies follows the fundamental equation:
-
-Rn = LE + H + W  (Eq. 1, Abdelrady et al., 2016)
-
-Where:
-- Rn = Net radiation (W·m⁻²) - total energy available at the water surface
-- LE = Latent heat flux (W·m⁻²) - energy used for evaporation
-- H = Sensible heat flux (W·m⁻²) - energy transferred to the atmosphere via convection
-- W = Water heat flux (W·m⁻²) - energy stored in or released from the water body
-
-### Water Heat Flux Calculation (Equilibrium Temperature Model)
-
-The water heat flux is calculated using the equilibrium temperature model (ETM) as developed by **Abdelrady et al. (2016), Equations 8-13** and integrated into the complete evaporation framework by **Fisher et al. (2023)**. This approach, originally developed by Edinger et al. (1968) and adapted for remote sensing applications by Abdelrady et al., recognizes that there exists a theoretical equilibrium temperature where net heat exchange equals zero. Fisher et al. demonstrated how to combine this water heat flux calculation with Priestley-Taylor evapotranspiration for complete energy balance estimation. The implementation follows the exact formulations from both papers.
-
-#### Step 1: Temperature Difference Calculation
-
-Tn = 0.5 × (WST - Td)  (Eq. 8, Abdelrady et al., 2016)
-
-Where:
-- Tn = Temperature difference parameter (°C)
-- WST = Water surface temperature (°C) - measured from thermal infrared satellite data
-- Td = Dew point temperature (°C) - temperature at which air becomes saturated
-
-**Scientific Reasoning**: The temperature difference between water surface and dew point drives evaporation. The factor of 0.5 represents an empirical relationship that accounts for the non-linear response of evaporation to temperature gradients.
-
-#### Step 2: Evaporation Efficiency
-
-η = 0.35 + 0.015 × WST + 0.0012 × Tn²  (Eq. 9, Abdelrady et al., 2016)
-
-Where:
-- η = Evaporation efficiency (dimensionless)
-- 0.35 = Baseline evaporation efficiency (dimensionless) - minimum efficiency under neutral conditions
-- 0.015 = Temperature dependence coefficient (°C⁻¹) - linear temperature sensitivity
-- 0.0012 = Non-linear temperature effect coefficient (°C⁻²) - captures enhanced efficiency at high temperatures
-
-**Scientific Reasoning**: Evaporation efficiency increases with water temperature and atmospheric stability. The baseline value represents minimum efficiency under neutral conditions, while the temperature terms account for enhanced molecular activity and vapor pressure differences at higher temperatures.
-
-#### Step 3: Wind Speed Scaling
-
-S = 3.3 × u  (Eq. 10, Abdelrady et al., 2016)
-
-Where:
-- S = Scaled wind speed factor (dimensionless) - wind enhancement of evaporation
-- u = Wind speed at reference height (m/s) - typically measured at 2-10m above surface
-- 3.3 = Empirical scaling coefficient (s/m) - derived from field measurements over water bodies
-
-**Scientific Reasoning**: Wind enhances evaporation by removing saturated air from the water surface and bringing in drier air. The scaling factor converts wind speed into an evaporation enhancement parameter based on field measurements over water bodies.
-
-#### Step 4: Thermal Exchange Coefficient
-
-β = 4.5 + 0.05 × WST + (η + 0.47) × S  (Eq. 11, Abdelrady et al., 2016)
-
-Where:
-- β = Thermal exchange coefficient (W·m⁻²·°C⁻¹) - overall heat transfer efficiency
-- 4.5 = Base thermal conductance (W·m⁻²·°C⁻¹) - minimum heat transfer under calm conditions
-- 0.05 = Temperature sensitivity coefficient (W·m⁻²·°C⁻²) - enhanced transfer at higher temperatures
-- 0.47 = Wind enhancement baseline (dimensionless) - minimum wind effect on thermal exchange
-
-**Scientific Reasoning**: The thermal exchange coefficient represents the efficiency of heat transfer between water and atmosphere. It increases with temperature (enhanced molecular motion) and wind (improved mixing), with the evaporation efficiency providing additional enhancement.
-
-#### Step 5: Equilibrium Temperature
-
-Te = Td + (SWnet / β)  (Eq. 12, Abdelrady et al., 2016)
-
-Where:
-- Te = Equilibrium temperature (°C)
-- SWnet = Net shortwave radiation (W·m⁻²) - solar energy absorbed by water surface
-
-**Scientific Reasoning**: The equilibrium temperature represents the theoretical water surface temperature at which net heat exchange would be zero. It increases with available solar energy and decreases with thermal exchange efficiency.
-
-#### Step 6: Water Heat Flux
-
-W = β × (Te - WST)  (Eq. 13, Abdelrady et al., 2016)
-
-**Scientific Reasoning**: The water heat flux is proportional to the difference between equilibrium and actual water temperatures. Positive values indicate energy storage in the water body (warming), while negative values indicate energy release (cooling).
-
-### Latent Heat Flux Calculation (Priestley-Taylor Method)
-
-The latent heat flux is calculated using the Priestley-Taylor equation, which is well-suited for water surfaces where aerodynamic resistance is minimal:
-
-LE = α × (Δ / (Δ + γ)) × (Rn - W)  (Priestley and Taylor, 1972)
-
-Where:
-- α = Priestley-Taylor coefficient (1.26 for water surfaces)
-- Δ = Slope of saturation vapor pressure curve (kPa/°C)
-- γ = Psychrometric constant (0.066 kPa/°C)
-- Δ / (Δ + γ) = Energy partitioning factor
-
-**Scientific Reasoning**: The Priestley-Taylor method assumes that evaporation from water surfaces is primarily energy-limited rather than aerodynamically limited. The coefficient α=1.26 accounts for the enhanced evaporation from free water surfaces compared to land surfaces.
-
-### Net Radiation Calculation
-
-Net radiation is calculated using the Verma et al. method when not provided directly:
-
-Rn = (SWin × (1 - αsurf)) + LWin - LWout
-
-Where:
-- SWin = Incoming shortwave radiation (W·m⁻²)
-- αsurf = Surface albedo (dimensionless)
-- LWin = Incoming longwave radiation (W·m⁻²)
-- LWout = Outgoing longwave radiation (W·m⁻²)
-
-### Salinity Correction
-
-For saline water bodies, evaporation is reduced according to Turk (1970):
-
-σ = 1.025 - 0.0246 × exp(0.00879 × S)  (Eq. 19, Abdelrady et al., 2016)
-
-Where:
-- σ = Salinity reduction factor (dimensionless)
-- S = Water salinity (g/L)
-
-**Scientific Reasoning**: Dissolved salts reduce vapor pressure according to Raoult's law, thereby decreasing evaporation rates. The exponential relationship captures the non-linear effect of increasing salinity concentrations.
-
-### Key References
-
-1. **Abdelrady, A.; Timmermans, J.; Vekerdy, Z.; Salama, M.S.** Surface Energy Balance of Fresh and Saline Waters: AquaSEBS. *Remote Sens.* 2016, 8, 583. https://doi.org/10.3390/rs8070583
-
-2. **Fisher, J.B.; Dohlen, M.B.; Halverson, G.H.; Collison, J.W.; Hook, S.J.; Hulley, G.C.** Remotely sensed terrestrial open water evaporation. *Sci. Rep.* 2023, 13, 8217. https://doi.org/10.1038/s41598-023-34921-2
-
-3. **Edinger, J.E.; Duttweiler, D.W.; Geyer, J.C.** The Response of Water Temperatures to Meteorological Conditions. *Water Resour. Res.* 1968, 4, 1137–1143.
-
-4. **Priestley, C.H.B.; Taylor, R.J.** On the Assessment of Surface Heat Flux and Evaporation Using Large-Scale Parameters. *Mon. Weather Rev.* 1972, 100, 81–92.
-
-5. **Turk, L.J.** Evaporation of Brine: A field study on the Bonneville Salt Flats, Utah. *Water Resour. Res.* 1970, 6, 1209–1215.
-
-## Installation
-
-### From PyPI (Recommended)
-
-```bash
-pip install AquaSEBS
-```
-
-### From Source
-
-```bash
-git clone https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS.git
-cd AquaSEBS
-pip install -e .[dev]
-```
-
-### Dependencies
-
-AquaSEBS requires Python 3.10+ and depends on several specialized packages:
-
-- `numpy` - Numerical computations
-- `rasters` - Raster data handling
-- `GEOS5FP` - GEOS-5 FP meteorological data access
-- `NASADEM` - NASA DEM and surface water data
-- `priestley-taylor` - Priestley-Taylor evapotranspiration calculations
-- `ECOv002-granules` - ECOSTRESS data processing
-- Additional scientific computing libraries
-
-## Quick Start
-
-### Basic Usage
-
-```python
-import numpy as np
-from datetime import datetime
-from AquaSEBS import AquaSEBS
-from rasters import RasterGeometry
-
-# Define study area geometry
-geometry = RasterGeometry.from_bounds(
-    left=-120.0, bottom=35.0, right=-119.0, top=36.0,
-    pixel_size=0.01  # ~1km resolution
-)
-
-# Specify observation time
-time_UTC = datetime(2023, 7, 15, 18, 0)  # Landsat overpass time
-
-# Water surface temperature (required input)
-WST_C = your_water_surface_temperature_data  # [°C] Celsius
-
-# Run AquaSEBS model
-results = AquaSEBS(
-    WST_C=WST_C,
-    geometry=geometry, 
-    time_UTC=time_UTC
-)
-
-# Access results
-latent_heat = results["LE_Wm2"]  # W⋅m⁻²
-water_heat_flux = results["W_Wm2"]  # W⋅m⁻²
-```
-
-### Advanced Usage with Custom Inputs
-
-```python
-# Provide additional meteorological inputs for better accuracy
-results = AquaSEBS(
-    WST_C=water_surface_temperature,     # [°C] Water surface temperature
-    Ta_C=air_temperature,                # [°C] Air temperature at 2m height
-    RH=relative_humidity,                # [0-1] Relative humidity fraction
-    windspeed_mps=wind_speed,            # [m/s] Wind speed at reference height
-    albedo=surface_albedo,               # [0-1] Surface reflectance fraction
-    emissivity=surface_emissivity,       # [0-1] Surface thermal emissivity
-    geometry=geometry,
-    time_UTC=time_UTC,
-    water=water_mask,                    # [boolean] Water body mask
-    mask_non_water_pixels=True
-)
-```
-
-### Water Heat Flux Calculation
-
-```python
-from AquaSEBS import water_heat_flux
-
-# Calculate water heat flux component
-whf_results = water_heat_flux(
-    WST_C=water_surface_temperature,     # [°C] Water surface temperature
-    Ta_C=air_temperature,                # [°C] Air temperature  
-    Td_C=dew_point_temperature,          # [°C] Dew point temperature
-    windspeed_mps=wind_speed,            # [m/s] Wind speed
-    SWnet=net_shortwave_radiation,       # [W/m²] Net shortwave radiation
-    geometry=geometry,
-    time_UTC=time_UTC
-)
-
-water_heat_flux_Wm2 = whf_results["W_Wm2"]  # [W/m²] Water heat flux output
-```
-
-## Model Components
-
-### Energy Balance Equation
-
-AquaSEBS implements the surface energy balance equation:
-
-Rn = LE + H + W
-
-Where:
-- Rn = Net radiation (W·m⁻²)
-- LE = Latent heat flux (W·m⁻²) - **calculated using Priestley-Taylor**
-- H = Sensible heat flux (W·m⁻²) - *derived as residual*
-- W = Water heat flux (W·m⁻²) - **calculated using equilibrium temperature model**
-
-### Water Heat Flux Model
-
-The water heat flux is calculated using the equilibrium temperature model:
-
-W = β (Te - WST)
-
-Where:
-- β = Thermal exchange coefficient (W·m⁻²·°C⁻¹)
-- Te = Equilibrium temperature (°C)
-- WST = Water surface temperature (°C)
-
-### Salinity Correction
-
-For saline water bodies, evaporation is reduced according to:
-
-Es = σ · Efresh
-
-Where σ is the salinity reduction factor based on water salinity concentration.
-
-## Data Requirements
-
-### Required Inputs
-- **Water Surface Temperature (WST_C)** [$\text{°C}$]: From thermal infrared satellite data (e.g., Landsat, MODIS, ECOSTRESS)
-  - Typical range: 0-50°C for natural water bodies
-  - Accuracy requirement: ±0.5°C for reliable evaporation estimates
-
-### Optional Inputs (automatically retrieved if not provided)
-- **Air Temperature (Ta_C)** [$\text{°C}$]: From GEOS-5 FP meteorological data
-  - Used for psychrometric calculations and dew point estimation
-- **Relative Humidity (RH)** [dimensionless, 0-1]: From GEOS-5 FP
-  - Converted internally to dew point temperature for ETM calculations
-- **Wind Speed (windspeed_mps)** [$\text{m}\,\text{s}^{-1}$]: From GEOS-5 FP
-  - Reference height: 2m above surface
-  - Enhanced evaporation at speeds >3 m/s
-- **Surface Albedo** [dimensionless, 0-1]: From GEOS-5 FP
-  - Typical water values: 0.05-0.15 depending on solar angle and conditions
-- **Incoming Solar Radiation (SWin)** [$\text{W}\,\text{m}^{-2}$]: From GEOS-5 FP
-  - Used to calculate net shortwave radiation with albedo
-- **Water Mask** [boolean]: From NASADEM Surface Water Body extent
-  - Identifies water pixels for focused calculations
-
-## Validation and Accuracy
-
-### Comprehensive Validation Study
-
-The AquaSEBS methodology has undergone extensive validation in one of the largest open water evaporation validation studies to date. Fisher et al. (2023) evaluated AquaSEBS against **19 in situ open water evaporation sites** from around the world, spanning multiple climate zones and measurement techniques, using both MODIS and Landsat satellite data.
-
-### Validation Sites and Methods
-
-**Geographic Coverage:**
-- **19 validation sites** across 7 Köppen-Geiger climate zones
-- **Measurement techniques:** Eddy covariance (11 sites), Bowen ratio energy balance (5 sites), bulk mass transfer (2 sites), floating evaporation pan (1 site)
-- **Site types:** Reservoirs and lakes of varying sizes from around the world
-- **Climate zones:** Humid subtropical, warm-summer humid continental, hot desert, cold semi-arid, hot semi-arid, cold desert, hot-summer humid continental
-
-**Data Sources:**
-- Great Lakes Evaporation Network (GLEN)
-- US Bureau of Reclamation's Open Water Evaporation Network (OWEN)
-- International research sites from multiple studies
-- Data spanning 1986-2019 across various temporal resolutions
-
-### Performance Metrics
-
-#### Instantaneous Evaporation (Controlled for High Wind Events)
-When controlling for high wind events (>7.5 m/s mean daily), AquaSEBS demonstrates strong performance:
-- **Correlation (r²):** 0.71
-- **RMSE:** 53.7 W/m² (38% of mean)
-- **Bias:** -19.1 W/m² (13% of mean)
-- **Sample size:** 686 cloud-free MODIS scenes
-
-#### Daily Evaporation Estimates
-Daily integration significantly improves accuracy and reduces sensitivity to short-term variations:
-
-**MODIS-based estimates:**
-- **Correlation (r²):** 0.47
-- **RMSE:** 1.5 mm/day (41% of mean)
-- **Bias:** 0.19 mm/day (1% of mean)
-
-**Landsat-based estimates:**
-- **Correlation (r²):** 0.56
-- **RMSE:** 1.2 mm/day (38% of mean)  
-- **Bias:** -0.8 mm/day (26% of mean)
-
-### Sensitivity Analysis
-
-#### High Wind Event Impact
-The methodology shows particular sensitivity to high wind events when evaporation shifts from radiatively-controlled to atmospherically-controlled:
-- **Without wind filtering:** r² = 0.47, RMSE = 84.4 W/m² (62% of mean), Bias = -49.5 W/m² (36% of mean)
-- **With wind filtering:** r² = 0.71, RMSE = 53.7 W/m² (38% of mean), Bias = -19.1 W/m² (13% of mean)
-
-#### Error Predictors
-Statistical analysis revealed key factors affecting model accuracy:
-- **Wind speed:** Primary predictor of evaporation error (coefficient: 20.10, p < 0.001)
-- **Relative humidity:** Secondary predictor (coefficient: -1.56, p < 0.001)
-- **Wind direction:** Tertiary predictor (coefficient: 0.14, p = 0.02)
-
-### Comparison with Previous Studies
-
-**Historical validation results:**
-- **Abdelrady et al. (2016):** RMSE 20-35 W/m², 1.5 mm/day (original development study)
-- **Rodrigues & Costa (2021):** RMSE 0.81-1.25 mm/day, r² 0.51-0.65
-- **This implementation:** RMSE 1.2-1.5 mm/day, r² 0.47-0.71
-
-### Machine Learning Benchmark
-
-Fisher et al. (2023) benchmarked AquaSEBS against 11 machine learning models to establish performance limits:
-- **Top ML models:** Multilayer Perceptron, Elastic Net, LASSO, Ridge Regression, TensorFlow Neural Network
-- **Result:** No machine learning model significantly outperformed AquaSEBS
-- **Error prediction:** Neural networks achieved r² = 0.74 for predicting model errors
-- **Conclusion:** Remaining errors likely due to measurement uncertainties, forcing data limitations, or scale mismatches rather than model formulation
-
-### Operational Validation
-
-**Current applications:**
-- **NASA ECOSTRESS mission:** Operational production of open water evaporation over millions of water bodies
-- **OpenET platform:** Core model for open water evaporation estimation in western United States
-- **Spatial resolution:** Successfully validated from 30m (Landsat) to 1km (MODIS) scales
-
-### Accuracy Summary
-
-**Recommended accuracy expectations:**
-- **Instantaneous estimates:** ±40-60 W/m² depending on wind conditions
-- **Daily estimates:** ±1.2-1.5 mm/day with minimal bias
-- **Optimal conditions:** Calm to moderate wind speeds (<7.5 m/s), clear sky conditions
-- **Temperature sensitivity:** ±0.5°C water surface temperature accuracy required for reliable results
-- **Spatial considerations:** Higher accuracy at 30m Landsat resolution compared to 1km MODIS
-
-### Limitations and Considerations
-
-**Known limitations:**
-- **High wind sensitivity:** Reduced accuracy during high wind events (>7.5 m/s daily mean)
-- **Scale mismatch:** Point measurements vs. pixel-scale estimates introduce uncertainty
-- **Temporal mismatch:** Instantaneous satellite vs. daily/monthly ground measurements
-- **Geographic gaps:** Limited validation in polar and high-altitude regions
-- **Forcing data uncertainty:** Meteorological input uncertainties propagate through model
-
-**Recommended applications:**
-- **Water resource management:** Daily to seasonal evaporation estimates
-- **Climate studies:** Long-term evaporation trends and patterns
-- **Operational monitoring:** Real-time to near-real-time evaporation assessment
-- **Scientific research:** Process understanding and water balance studies
-
-## Examples and Notebooks
-
-The `notebooks/` directory contains Jupyter notebooks demonstrating:
-
-- `Water Heat Flux.ipynb` - Water heat flux calculations and validation
-- `Water Masking.ipynb` - Water body identification and masking
-- `Water Surface Latent Heat Flux.ipynb` - Complete evaporation estimation workflow
-
-## Command Line Interface
-
-Build and test the package using the provided Makefile:
-
-```bash
-# Install in development mode
-make install
-
-# Run tests  
-make test
-
-# Build distribution
-make build
-
-# Clean build artifacts
-make clean
-```
-
-## API Reference
-
-### Main Functions
-
-#### `AquaSEBS()`
-Main function for complete energy balance calculation.
-
-**Parameters:**
-- `WST_C`: Water surface temperature [$\text{°C}$] - from thermal infrared satellite data
-- `geometry`: RasterGeometry object defining study area [spatial coordinates]
-- `time_UTC`: datetime object for observation time [UTC timestamp]
-- `Ta_C`: Air temperature [$\text{°C}$] - optional, auto-retrieved from GEOS-5 FP if not provided
-- `RH`: Relative humidity [dimensionless, 0-1] - optional, auto-retrieved from GEOS-5 FP
-- `windspeed_mps`: Wind speed [$\text{m}\,\text{s}^{-1}$] - optional, auto-retrieved from GEOS-5 FP
-- `albedo`: Surface albedo [dimensionless, 0-1] - optional, auto-retrieved from GEOS-5 FP
-- `emissivity`: Surface emissivity [dimensionless, 0-1] - optional, required for net radiation calculation
-- `Td_C`: Dew point temperature [$\text{°C}$] - optional, calculated from Ta_C and RH if not provided
-- `Rn_Wm2`: Net radiation [$\text{W}\,\text{m}^{-2}$] - optional, calculated using Verma method if not provided
-- `SWnet`: Net shortwave radiation [$\text{W}\,\text{m}^{-2}$] - optional, calculated from incoming SW and albedo
-- `water`: Water body mask [boolean array] - optional, auto-retrieved from NASADEM if not provided
-- Additional parameters for model customization
-
-**Returns:**
-Dictionary containing instantaneous energy balance components and derived products:
-- `LE_Wm2`: Latent heat flux [$\text{W}\,\text{m}^{-2}$] - energy used for evaporation
-- `W_Wm2`: Water heat flux [$\text{W}\,\text{m}^{-2}$] - energy stored in water body
-- `Rn_Wm2`: Net radiation [$\text{W}\,\text{m}^{-2}$] - total available energy
-- `epsilon`: Psychrometric parameter [dimensionless] - energy partitioning factor
-- `beta`: Thermal exchange coefficient [$\text{W}\,\text{m}^{-2}\,\text{°C}^{-1}$] - heat transfer efficiency
-- `Te`: Equilibrium temperature [$\text{°C}$] - theoretical zero net heat exchange temperature
-- `Tn`: Temperature difference parameter [$\text{°C}$] - driving force for evaporation
-- `eta`: Evaporation efficiency [dimensionless] - atmospheric stability factor
-- Additional intermediate variables from sub-calculations
-
-#### `water_heat_flux()`
-Calculate water heat flux using equilibrium temperature model.
-
-**Parameters:**
-- `WST_C`: Water surface temperature [$\text{°C}$] - required input
-- `Ta_C`: Air temperature [$\text{°C}$] - optional, auto-retrieved from GEOS-5 FP
-- `Td_C`: Dew point temperature [$\text{°C}$] - optional, calculated from Ta_C and RH
-- `windspeed_mps`: Wind speed [$\text{m}\,\text{s}^{-1}$] - optional, auto-retrieved from GEOS-5 FP
-- `SWnet`: Net shortwave radiation [$\text{W}\,\text{m}^{-2}$] - optional, calculated from SWin and albedo
-- Other parameters similar to `AquaSEBS()` function
-
-**Returns:**
-Dictionary with water heat flux and intermediate variables:
-- `W_Wm2`: Water heat flux [$\text{W}\,\text{m}^{-2}$] - main output
-- `beta`: Thermal exchange coefficient [$\text{W}\,\text{m}^{-2}\,\text{°C}^{-1}$]
-- `Te`: Equilibrium temperature [$\text{°C}$]
-- `Tn`: Temperature difference [$\text{°C}$]
-- `eta`: Evaporation efficiency [dimensionless]
-- `S`: Scaled wind speed factor [dimensionless]
-- All input variables passed through for reference
-
-## Contributing
-
-We welcome contributions! Please see our contributing guidelines and submit pull requests to the main repository.
-
-### Development Setup
-
-```bash
-# Clone repository
-git clone https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS.git
-cd AquaSEBS
-
-# Create development environment
-mamba create -n AquaSEBS -c conda-forge python=3.10
-mamba activate AquaSEBS
-
-# Install in development mode
-pip install -e .[dev]
-
-# Run tests
-pytest
-```
-
-## Authors and Attribution
-
-**Authors:**
-- **Gregory H. Halverson** - NASA Jet Propulsion Laboratory (gregory.h.halverson@jpl.nasa.gov)
-- **Joshua B. Fisher** - Chapman University (jbfisher@chapman.edu)
-
-**Original AquaSEBS methodology:**
-- Ahmed Abdelrady, Joris Timmermans, Zoltán Vekerdy, Mhd. Suhyb Salama
-
-## License
-
-This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
-
-## Acknowledgments
-
-This research was supported by:
-- NASA Jet Propulsion Laboratory
-- Chapman University  
-- European Space Agency (ESA) Alcantara project
-- University of Twente (ITC)
+**Author:** Gregory H. Halverson (they/them) — [gregory.h.halverson@jpl.nasa.gov](mailto:gregory.h.halverson@jpl.nasa.gov) — NASA Jet Propulsion Laboratory 321H
 
 ## Citation
 
-If you use AquaSEBS in your research, please cite:
+If you use `AquaSEBS` in your research, please cite the software package and the foundational scientific publications:
 
 ```bibtex
+@software{halverson2026aquasebs,
+  title={AquaSEBS: Aquatic Surface Energy Balance System Water Surface Evaporation Model},
+  author={Halverson, Gregory H.},
+  version={1.4.0},
+  year={2026},
+  publisher={GitHub},
+  url={https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS}
+}
+
 @article{abdelrady2016aquasebs,
   title={Surface Energy Balance of Fresh and Saline Waters: AquaSEBS},
-  author={Abdelrady, Ahmed and Timmermans, Joris and Vekerdy, Zolt{\'a}n and Salama, Mhd Suhyb},
+  author={Abdelrady, Ahmed and Timmermans, Joris and Vekerdy, Zolt{\'a}n and Salama, Mhd. Suhyb},
   journal={Remote Sensing},
   volume={8},
   number={7},
@@ -561,19 +32,425 @@ If you use AquaSEBS in your research, please cite:
 
 @article{fisher2023remotely,
   title={Remotely sensed terrestrial open water evaporation},
-  author={Fisher, Joshua B and Dohlen, Mary B and Halverson, Gregory H and Collison, Jared W and Hook, Simon J and Hulley, Glynn C},
+  author={Fisher, Joshua B and Dohlen, Matthew B and Halverson, Gregory H and Collison, Jacob W and Pearson, Christopher and Huntington, Justin L},
   journal={Scientific Reports},
   volume={13},
   number={1},
-  pages={8217},
+  pages={8174},
   year={2023},
   publisher={Nature Publishing Group},
   doi={10.1038/s41598-023-34921-2}
 }
 ```
 
-## Links
+## Table of Contents
 
-- **Homepage**: https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS
-- **PyPI**: https://pypi.org/project/AquaSEBS/
-- **Issues**: https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS/issues
+1. [User Guide](#1-user-guide)
+2. [Scientific Background and Theoretical Framework](#2-scientific-background-and-theoretical-framework)
+3. [Computational Methodology](#3-computational-methodology)
+4. [Validation Benchmark Summary](#4-validation-benchmark-summary)
+5. [Scientific Caveats and Methodological Limitations](#5-scientific-caveats-and-methodological-limitations)
+6. [Repository Release and Commit History](#6-repository-release-and-commit-history)
+7. [Contributing, License, and Links](#7-contributing-license-and-links)
+
+## 1. User Guide
+
+### 1.1 Overview
+
+Developed at NASA JPL for **ECOSTRESS Collection 2+** (`L3_ET_PT-JPL` / `L3T_JET`) and deployed in the **OpenET** platform, `AquaSEBS` implements the operational hybrid open-water surface energy balance formulation validated across 19 global open-water sites in **Fisher et al. (2023)**:
+
+- **Water Heat Flux ($W$):** Computed via the **Equilibrium Temperature Model (ETM)** of Edinger et al. (1968) as adapted for remote sensing by Abdelrady et al. (2016, Eqs. 8–13).
+- **Latent Heat Flux ($LE$):** Computed via the energy-limited **Priestley–Taylor (1972)** equation ($\alpha = 1.26$) applied to net available energy $(R_n - W)$.
+- **Optional Salinity Scaling ($\sigma$):** Supports Turk's (1970) exponential salinity reduction factor via `salinity_gL` (default `None`, preserving freshwater potential evaporation parity with ECOSTRESS Collection 3 `BuildID 0700`).
+- **Automated Data & Masking Integration:** Automatically retrieves missing meteorological and shortwave radiative forcings from NASA's **GEOS-5 FP** assimilation system (`wind_speed_mps`, `Ta_C`, `RH`, `SWin`, `ALBEDO`), masks non-water pixels using the **NASADEM Surface Water Body (`NASADEM.swb`)** product, and gracefully returns shape/geometry-matched `NaN` arrays when a scene contains zero valid open-water pixels.
+
+### 1.2 Installation
+
+#### Install from PyPI
+
+```bash
+pip install AquaSEBS
+```
+
+#### Install from Source (Development Environment)
+
+```bash
+git clone https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS.git
+cd AquaSEBS
+
+# Create a Conda/Mamba environment (Python 3.11+ supported; 3.14 default)
+mamba create -y -n AquaSEBS -c conda-forge python=3.14
+mamba activate AquaSEBS
+
+# Install in editable mode with test and build dependencies
+pip install -e .[dev]
+```
+
+#### Core Dependencies
+
+- `numpy` — Array math and elementwise operations
+- `rasters` — Geospatial `Raster` and `RasterGeometry` handling
+- `GEOS5FP` — Automated NASA GEOS-5 FP meteorological and radiation retrieval
+- `NASADEM` — Automated static surface water body (`swb`) masking
+- `priestley-taylor` ($\ge 1.1.2$) — Psychrometric slope ($\Delta / (\Delta + \gamma)$) and Priestley–Taylor flux solver
+- `verma-net-radiation` — Broadband net radiation ($R_n$) calculation
+- `daylight-evapotranspiration` — Sinusoidal diurnal integration from instantaneous $LE$ to daylight totals
+- `check-distribution` — Input/output numerical range and distribution logging
+- `pytictoc` — Execution timing for diurnal upscaling
+
+### 1.3 Usage Workflows
+
+#### Standalone Offline Execution (NumPy Arrays / Scalars)
+
+When you already have all meteorological and radiative forcing inputs (from flux towers, weather stations, or pre-loaded arrays), you can run `AquaSEBS()` completely offline without network access:
+
+```python
+import numpy as np
+from AquaSEBS import AquaSEBS
+
+# Example inputs for two open-water pixels
+WST_C = np.array([[22.0, 24.5]])          # Water surface temperature [°C]
+Ta_C = np.array([[25.0, 26.0]])           # Air temperature [°C]
+Td_C = np.array([[14.0, 15.0]])           # Dew-point temperature [°C]
+windspeed_mps = np.array([[3.2, 4.1]])    # Wind speed [m s^-1]
+SWnet = np.array([[560.0, 580.0]])        # Net shortwave radiation [W m^-2]
+Rn_Wm2 = np.array([[510.0, 530.0]])       # Net broadband radiation [W m^-2]
+
+results = AquaSEBS(
+    WST_C=WST_C,
+    Ta_C=Ta_C,
+    Td_C=Td_C,
+    windspeed_mps=windspeed_mps,
+    SWnet=SWnet,
+    Rn_Wm2=Rn_Wm2,
+    mask_non_water_pixels=False,
+    offline_mode=True
+)
+
+print("Water heat flux W [W m^-2]:", results["W_Wm2"])
+print("Latent heat flux LE [W m^-2]:", results["LE_Wm2"])
+print("Equilibrium temp Te [°C]:", results["Te"])
+```
+
+#### Automated Satellite Raster Workflow (with GEOS-5 FP & NASADEM)
+
+When passing a georeferenced `rasters.Raster` for `WST_C` (such as ECOSTRESS L2 LSTE or Landsat ARD Surface Temperature) and an observation timestamp `time_UTC`, `AquaSEBS()` automatically infers `geometry`, downloads the `NASADEM.swb` open-water mask, retrieves missing forcings from `GEOS5FP`, and computes `Rn_Wm2` via `verma_net_radiation()`:
+
+```python
+from datetime import datetime
+import rasters as rt
+from AquaSEBS import AquaSEBS
+
+# Load satellite thermal, albedo, and emissivity rasters
+WST_C = rt.Raster.open("ECOSTRESS_WST_C.tif")
+albedo = rt.Raster.open("albedo.tif")
+emissivity = rt.Raster.open("emissivity.tif")
+time_UTC = datetime(2023, 7, 15, 18, 30)
+
+results = AquaSEBS(
+    WST_C=WST_C,
+    albedo=albedo,
+    emissivity=emissivity,
+    time_UTC=time_UTC,
+    mask_non_water_pixels=True,
+    upscale_to_daylight=True
+)
+
+# Save output rasters
+results["LE_Wm2"].to_geotiff("AquaSEBS_LE_instantaneous_Wm2.tif")
+results["W_Wm2"].to_geotiff("AquaSEBS_W_instantaneous_Wm2.tif")
+```
+
+#### Computing Water Heat Flux Directly (`water_heat_flux`)
+
+```python
+import numpy as np
+from AquaSEBS import water_heat_flux
+
+whf = water_heat_flux(
+    WST_C=np.array([20.0]),
+    Td_C=np.array([10.0]),
+    windspeed_mps=np.array([3.0]),
+    SWnet=np.array([500.0]),
+    mask_non_water_pixels=False
+)
+
+print("Half temp gradient Tn [°C]:", whf["Tn"])
+print("Evaporation efficiency η:", whf["η"])
+print("Thermal exchange coeff β [W m^-2 °C^-1]:", whf["β"])
+print("Equilibrium temp Te [°C]:", whf["Te"])
+print("Water heat flux W [W m^-2]:", whf["W_Wm2"])
+```
+
+#### Daylight / Daily Evapotranspiration Upscaling
+
+Set `upscale_to_daylight=True` alongside `time_UTC` (and `geometry`) to integrate instantaneous overpass `LE_Wm2` across daylight hours using sinusoidal diurnal net radiation scaling:
+
+```python
+results = AquaSEBS(
+    WST_C=WST_C,
+    Rn_Wm2=Rn_Wm2,
+    Ta_C=Ta_C,
+    Td_C=Td_C,
+    windspeed_mps=windspeed_mps,
+    SWnet=SWnet,
+    geometry=geometry,
+    time_UTC=datetime(2023, 7, 15, 17, 30),
+    upscale_to_daylight=True,
+    mask_non_water_pixels=False
+)
+```
+
+### 1.4 API Reference
+
+#### `AquaSEBS()`
+
+```python
+AquaSEBS(
+    WST_C,
+    emissivity=None,
+    albedo=None,
+    Ta_C=None,
+    RH=None,
+    Td_C=None,
+    windspeed_mps=None,
+    SWnet=None,
+    Rn_Wm2=None,
+    W_Wm2=None,
+    SWin_Wm2=None,
+    salinity_gL=None,
+    geometry=None,
+    time_UTC=None,
+    water=None,
+    GEOS5FP_connection=None,
+    α=PT_ALPHA,
+    γ_Pa=GAMMA_PA,
+    resampling="cubic",
+    upscale_to_daylight=False,
+    mask_non_water_pixels=True,
+    dewpoint_method="linear",
+    offline_mode=False
+) -> Dict[str, Union[Raster, np.ndarray, float]]
+```
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `WST_C` | `Raster \| ndarray` | **Required** | Water surface skin temperature ($^\circ\text{C}$). |
+| `emissivity` | `Raster \| ndarray \| None` | `None` | Surface thermal emissivity ($0\text{–}1$). Required if `Rn_Wm2` is omitted. |
+| `albedo` | `Raster \| ndarray \| None` | `None` | Broadband surface albedo ($0\text{–}1$). Required if `Rn_Wm2` is omitted; also forwarded to `water_heat_flux` when `SWnet` is omitted. |
+| `Ta_C` | `Raster \| ndarray \| None` | `None` | Near-surface air temperature ($^\circ\text{C}$). Auto-fetched from `GEOS5FP` if omitted (when `offline_mode=False`). |
+| `RH` | `Raster \| ndarray \| None` | `None` | Near-surface relative humidity fraction ($0\text{–}1$). Auto-fetched if omitted (when `offline_mode=False`) and forwarded to `verma_net_radiation` and `water_heat_flux`. |
+| `Td_C` | `Raster \| ndarray \| None` | `None` | Near-surface dew-point temperature ($^\circ\text{C}$). Estimated from `Ta_C` and `RH` if omitted. |
+| `windspeed_mps` | `Raster \| ndarray \| None` | `None` | Wind speed ($\text{m}\cdot\text{s}^{-1}$). Auto-fetched from `GEOS5FP` (`wind_speed_mps`) if omitted (when `offline_mode=False`). |
+| `SWnet` | `Raster \| ndarray \| None` | `None` | Net shortwave radiation ($\text{W}\cdot\text{m}^{-2}$). Computed from `SWin_Wm2` and `albedo` if omitted. |
+| `Rn_Wm2` | `Raster \| ndarray \| None` | `None` | Broadband net radiation ($\text{W}\cdot\text{m}^{-2}$). Computed via `verma_net_radiation` if omitted. |
+| `W_Wm2` | `Raster \| ndarray \| None` | `None` | Water heat flux ($\text{W}\cdot\text{m}^{-2}$). Computed via `water_heat_flux` if omitted. |
+| `SWin_Wm2` | `Raster \| ndarray \| None` | `None` | Incoming shortwave radiation ($\text{W}\cdot\text{m}^{-2}$). Auto-fetched if omitted (when `offline_mode=False`) and forwarded to `water_heat_flux`. |
+| `salinity_gL` | `Raster \| ndarray \| float \| None` | `None` | Optional water salinity ($\text{g}\cdot\text{L}^{-1}$). When `None`, freshwater potential evaporation is computed (Collection 3 baseline); when provided, scales `LE_Wm2` by Turk's (1970) factor $\sigma$. |
+| `geometry` | `RasterGeometry \| None` | `None` | Spatial grid definition; inferred from `WST_C.geometry` if `WST_C` is a `Raster`. |
+| `time_UTC` | `datetime \| None` | `None` | Observation UTC timestamp for reanalysis queries and daylight integration. |
+| `water` | `Raster \| ndarray \| None` | `None` | Binary/boolean water mask (`True`/`1` = water). Auto-fetched via `NASADEM.swb` if `mask_non_water_pixels=True`, `geometry` is given, and `offline_mode=False`. |
+| `GEOS5FP_connection` | `GEOS5FP \| None` | `None` | Reusable `GEOS5FP` connection object (instantiated lazily only if a network retrieval is needed). |
+| `α` | `Raster \| ndarray \| float` | `1.26` | Priestley–Taylor coefficient (dimensionless). |
+| `γ_Pa` | `Raster \| ndarray \| float` | `GAMMA_PA` | Psychrometric constant ($\text{Pa}\cdot\text{K}^{-1}$). |
+| `resampling` | `str` | `"cubic"` | Spatial resampling method for reprojecting meteorological grids. |
+| `upscale_to_daylight` | `bool` | `False` | Enable diurnal integration to daylight/daily ET totals. |
+| `mask_non_water_pixels` | `bool` | `True` | Mask non-water pixels in `WST_C` to `NaN` using `water` (returning all-`NaN` outputs cleanly when zero valid water pixels exist). |
+| `dewpoint_method` | `str` | `"linear"` | Dew-point estimation method when `Td_C` is omitted: `"linear"` (Collection 3 baseline) or `"magnus_tetens"`. |
+| `offline_mode` | `bool` | `False` | Raise `MissingOfflineParameter` rather than querying `GEOS5FP` or `NASADEM` when inputs are absent. |
+
+#### Return Dictionary Keys
+
+- **Primary Fluxes:** `LE_Wm2`, `LE_potential_Wm2`, `W_Wm2`, `G_Wm2`, `Rn_Wm2` ($\text{W}\cdot\text{m}^{-2}$)
+- **ETM Intermediates (when `W_Wm2` is calculated):** `Tn` ($^\circ\text{C}$), `η` (dimensionless), `S` ($\text{m}\cdot\text{s}^{-1}$), `β` ($\text{W}\cdot\text{m}^{-2}\cdot^\circ\text{C}^{-1}$), `Te` ($^\circ\text{C}$)
+- **Diagnostics & Optional Scaling Factors:** `high_wind_flag` (boolean mask where `windspeed_mps > 7.5`), `salinity_reduction_factor` ($\sigma$, included when `salinity_gL` is provided)
+- **Psychrometric & Radiation Intermediates:** `epsilon`, plus `verma_net_radiation` outputs (`SWnet`, `LWin`, `LWout`, etc.) when `Rn_Wm2` is calculated internally
+- **Daylight Upscaling Outputs (when `upscale_to_daylight=True`):** `daylight_evapotranspiration` outputs (`LE_daylight_Wm2`, `ET_daylight_mm`, etc.)
+
+### 1.5 Development & Release CLI
+
+Common development, testing, and release tasks are available via `makefile`:
+
+```bash
+make install                   # Install in editable mode with [dev] dependencies
+make test                      # Run pytest suite
+make set-version VERSION=X.Y.Z # Update version across pyproject.toml, CITATION.cff, and README.md
+make build                     # Build wheel and sdist
+make clean                     # Remove build artifacts and caches
+```
+
+## 2. Scientific Background and Theoretical Framework
+
+### 2.1 Motivation & Operational Context
+
+Evaporation from open water bodies—spanning oceans, natural lakes, reservoirs, and inland seas—plays a governing role in global and regional hydrological cycles. Oceans account for roughly $86\%$ of global evaporation feeding the atmospheric water cycle, while terrestrial reservoirs and lakes are critical freshwater resources increasingly stressed by climate variability and human abstraction.
+
+Measuring open-water evaporation in situ is logistically difficult and spatially unrepresentative:
+
+- **Instrumentation challenges:** Eddy covariance towers require stable platforms and strict fetch/footprint constraints; Bowen ratio systems lose sub-daily temporal fidelity; and bulk aerodynamic/mass-transfer formulations depend heavily on site-specific empirical wind coefficients.
+- **Spatial heterogeneity:** Evaporation rates vary markedly across a single water body due to underlying bathymetry, subsurface heat storage and circulation, shoreline geometry, and horizontal advection of warm, dry air from surrounding land.
+
+Satellite thermal infrared remote sensing resolves spatial gradients in water surface temperature ($T_0$) at fine scales ($30\text{ m}$ Landsat, $70\text{ m}$ ECOSTRESS, $1\text{ km}$ MODIS). **AquaSEBS** adapts terrestrial remote-sensing energy balance models to open water surfaces and serves as the operational open-water evaporation algorithm for **NASA's ECOSTRESS mission** (`L3_ET_PT-JPL` Collection 2+ / `L3T_JET`) and the **OpenET** platform.
+
+### 2.2 Evolution of the AquaSEBS Framework
+
+1. **Original Formulation — Abdelrady et al. (2016):** Adapted Su's (2002) one-source **Surface Energy Balance System (SEBS)** for fresh and saline water bodies by replacing constant-fraction ground heat flux approximations ($G_0 = 0.5 R_n$) with Edinger et al.'s (1968) **Equilibrium Temperature Model (ETM)** for instantaneous water heat flux ($G_{0w}$), calibrating momentum and heat roughness lengths over Lake IJsselmeer ($z_{0m} = 0.0002\text{ m}$, $z_{0h} = 0.0001\text{ m}$, $kB^{-1} \approx 0.3$), defining water-specific wet/dry evaporative fraction bounds, and incorporating Turk's (1970) salinity reduction factor ($\sigma$).
+2. **JPL ECOSTRESS Adaptation & Global Validation — Halverson & Fisher et al. (2023):** Adapted by Gregory H. Halverson at NASA JPL for the ECOSTRESS mission and validated globally by Joshua B. Fisher et al. (2023), coupling Abdelrady et al.'s (2016) exact 6-equation Equilibrium Temperature Model (ETM) for instantaneous water heat flux ($W$, denoted $G_{0w}$) with the **Priestley–Taylor (1972)** energy-limited formulation ($\alpha = 1.26$) for instantaneous latent heat flux ($LE$), paired with sinusoidal diurnal radiation scaling (Bisht et al., 2005; Fisher, 2018) for daily totals.
+
+### 2.3 Mathematical Formulation
+
+#### Surface Energy Balance
+
+$$
+R_n = LE + H + W
+$$
+
+where $R_n$ is net broadband radiation ($\text{W}\cdot\text{m}^{-2}$), $LE$ (or $\lambda E$) is latent heat flux consumed by evaporation ($\text{W}\cdot\text{m}^{-2}$), $H$ is sensible heat flux exchanged with the atmosphere ($\text{W}\cdot\text{m}^{-2}$), and $W$ (or $G_{0w}$) is water heat flux stored in ($W > 0$) or released from ($W < 0$) the water column ($\text{W}\cdot\text{m}^{-2}$).
+
+#### Net Radiation ($R_n$)
+
+When not supplied directly, $R_n$ is computed via the Verma et al. (2016) surface radiation balance:
+
+$$
+R_n = \text{SW}_{\text{in}}(1 - \alpha_{\text{surf}}) + \text{LW}_{\text{in}} - \text{LW}_{\text{out}}
+$$
+
+#### Water Heat Flux via Equilibrium Temperature Model ($W$)
+
+In situ water heat flux is defined vertically by the depth-integrated heat storage rate $W = \rho_w c_w \int_{0}^{Z} \frac{\Delta T}{\Delta t}\, dZ$. Because thermal infrared satellites observe only skin temperature ($T_0$, upper $\sim 10\text{--}100\,\mu\text{m}$), AquaSEBS solves for the hypothetical **equilibrium temperature** ($T_e$) at which net air–water heat exchange equals zero (Edinger et al., 1968; Abdelrady et al., 2016, Eqs. 8–13; Fisher et al., 2023, Eqs. 1–6):
+
+1. **Half Temperature Gradient ($T_n$, $^\circ\text{C}$):**
+   $$T_n = 0.5\,(T_0 - T_d)$$
+2. **Evaporation Efficiency Factor ($\eta$, dimensionless):**
+   $$\eta = 0.35 + 0.015\,T_0 + 0.0012\,T_n^2$$
+3. **Scaled Wind Speed Function ($S(W)$, $\text{m}\cdot\text{s}^{-1}$):**
+   $$S(W) = 3.3\,u$$
+4. **Thermal Exchange Coefficient ($\beta$, $\text{W}\cdot\text{m}^{-2}\cdot^\circ\text{C}^{-1}$):**
+   $$\beta = 4.5 + 0.05\,T_0 + (\eta + 0.47)\,S(W)$$
+5. **Equilibrium Temperature ($T_e$, $^\circ\text{C}$):**
+   $$T_e = T_d + \frac{\text{SW}_{\text{net}}}{\beta}$$
+6. **Instantaneous Water Heat Flux ($W$, $\text{W}\cdot\text{m}^{-2}$):**
+   $$W = \beta\,(T_e - T_0)$$
+
+#### Latent Heat Flux via Priestley–Taylor ($LE$)
+
+Over open water surfaces where moisture supply is unlimited and surface resistance is zero (Priestley & Taylor, 1972; Fisher et al., 2023, Eq. 7):
+
+$$
+LE = \alpha \left(\frac{\Delta}{\Delta + \gamma}\right)(R_n - W)
+$$
+
+where $\alpha = 1.26$ is the Priestley–Taylor coefficient, $\Delta$ is the slope of the saturation vapor pressure–temperature curve at air temperature $T_a$, $\gamma$ is the psychrometric constant ($\approx 66\text{ Pa}\cdot^\circ\text{C}^{-1}$ or $0.066\text{ kPa}\cdot^\circ\text{C}^{-1}$), and $\epsilon = \frac{\Delta}{\Delta + \gamma}$ is the dimensionless psychrometric energy-partitioning factor.
+
+#### Salinity Reduction Factor ($\sigma$)
+
+Dissolved salts lower saturation vapor pressure according to Raoult's law. When `salinity_gL` ($S$, $\text{g}\cdot\text{L}^{-1}$) is provided, `AquaSEBS()` applies Turk's (1970) empirical brine evaporation reduction factor (Abdelrady et al., 2016, Eqs. 19–20):
+
+$$
+\sigma = \text{clip}\!\left(1.025 - 0.0246 \exp(0.00879 \cdot S),\; 0.0,\; 1.0\right), \qquad LE_s = \sigma \cdot LE_{\text{fresh}}
+$$
+
+yielding $< 1\%$ reduction in fresh/brackish water ($0\text{–}20\text{ g}\cdot\text{L}^{-1}$), $\sim 1\%$ in open ocean ($34.7\text{ g}\cdot\text{L}^{-1}$), $\sim 22\%\text{–}27\%$ in hypersaline lakes such as the Great Salt Lake ($240\text{ g}\cdot\text{L}^{-1}$), and $\sim 32\%$ at $300\text{ g}\cdot\text{L}^{-1}$.
+
+## 3. Computational Methodology
+
+### 3.1 Step-by-Step Execution Pipeline
+
+1. **Spatial Geometry & Water Pixel Masking (`AquaSEBS.py`, `water_heat_flux.py`):**
+   - Infers `geometry` from `WST_C.geometry` when `WST_C` is a `rasters.Raster` and `geometry` is omitted.
+   - When `mask_non_water_pixels=True` (default), retrieves the static binary surface water body extent from `NASADEM.swb(geometry=geometry)` when `water is None`, `geometry` is provided, and `offline_mode=False` (raising `MissingOfflineParameter` if `offline_mode=True`), and sets non-water pixels in `WST_C` to `NaN` via `rt.where(water, WST_C, np.nan)`.
+   - If zero finite water pixels remain after masking (e.g., land-only MGRS tiles or cloud-masked water bodies), returns shape- and `RasterGeometry`-matched `NaN` arrays cleanly without raising `BlankOutputError`.
+2. **Meteorological & Radiative Forcing Acquisition (`GEOS5FP` & `verma_net_radiation`):**
+   - Lazily instantiates `GEOS5FP` only when an omitted forcing must be retrieved and `offline_mode=False`.
+   - Retrieves missing `Ta_C`, `RH`, `windspeed_mps` (via `wind_speed_mps`), `SWin`, and `ALBEDO` from NASA **GEOS-5 FP** (default `"cubic"` resampling) when `geometry` and `time_UTC` are provided.
+   - Computes `Rn_Wm2` via `verma_net_radiation()` when `Rn_Wm2` is omitted and `albedo`, `emissivity`, `geometry`, and `time_UTC` are supplied.
+   - Forwards `RH`, `SWin_Wm2`, `albedo`, `dewpoint_method`, and `offline_mode` from `AquaSEBS()` to `water_heat_flux()`. Estimates dew-point temperature `Td_C` inside `water_heat_flux()` when omitted using either `dewpoint_method="linear"` ($T_d = T_a - \frac{100 - 100 \cdot \text{RH}}{5.0}$, default) or `dewpoint_method="magnus_tetens"`, and computes net shortwave radiation as $\text{SW}_{\text{net}} = \text{SW}_{\text{in}} \cdot (1 - \alpha_{\text{surf}})$.
+3. **Water Heat Flux & High-Wind Diagnostics (`water_heat_flux.py`):**
+   - Evaluates ETM Equations 8–13 ($T_n, \eta, S, \beta, T_e, W_{\text{Wm2}}$) without artificial clipping bounds so negative nighttime/cooling heat release is preserved, and flags `high_wind_flag = windspeed_mps > 7.5`.
+4. **Instantaneous Latent Heat Flux & Salinity Scaling (`AquaSEBS.py`):**
+   - Computes $\epsilon = \Delta / (\Delta + \gamma)$ via `priestley_taylor.epsilon_from_Ta_C()` and evaluates potential open-water latent heat flux via `priestley_taylor()`, applying Turk's (1970) factor $\sigma$ if `salinity_gL` is provided. Sensible heat flux ($H$) remains the implicit residual $H = R_n - W - \text{LE}$.
+5. **Optional Diurnal Upscaling (`AquaSEBS.py`):**
+   - When `upscale_to_daylight=True` and `time_UTC` is provided, invokes `daylight_ET_from_instantaneous_LE()` using instantaneous `LE_Wm2`, `Rn_Wm2`, and `W_Wm2` (as `G_instantaneous_Wm2`) to compute daylight-integrated ET totals.
+
+### 3.2 Literature vs. Codebase Implementation Matrix
+
+| Model Component | Abdelrady et al. (2016) | Fisher et al. (2023) | Implemented Code (`v1.4.0`) |
+| :--- | :--- | :--- | :--- |
+| **Water Masking** | Manual wind-direction fetch / static mask | MODIS/Landsat land-water mask | Automated `NASADEM.swb` (`rt.where`, all-`NaN` safe) |
+| **Net Radiation ($R_n$)** | 4-component radiation input | FLiES/BESS + surface energy balance | `verma_net_radiation` (`GEOS5FP` + thermal) |
+| **Water Heat Flux ($W$)** | ETM (Eqs. 8–13) | ETM (Eqs. 1–6) | **Exact match** (`water_heat_flux.py`) |
+| **Dew Point ($T_d$)** | Measured / ECMWF reanalysis | MODIS `MOD07_L2` / NCEP reanalysis | `"linear"` default (Col. 3 parity) + `"magnus_tetens"` opt-in |
+| **Sensible Heat ($H$)** | Iterative MOS ($z_{0m}=0.0002$, $z_{0h}=0.0001$) | Not solved explicitly | Not solved explicitly |
+| **Latent Heat ($\text{LE}$)** | SEBS evaporative fraction ($EF_r$) | Priestley–Taylor ($\alpha = 1.26$) | **Exact match** (`priestley_taylor`) |
+| **Salinity Correction ($\sigma$)** | Turk (1970) exponential factor | Noted as future sensitivity | Opt-in `salinity_gL` (`salinity_reduction_factor`) |
+| **High-Wind Regime** | — | $u > 7.5\text{ m}\cdot\text{s}^{-1}$ regime shift | Diagnostic `"high_wind_flag"` mask (`u > 7.5`) |
+| **Daily Upscaling** | Daily $EF$ scaling | Sinusoidal diurnal $R_n$ + $EF$ | Optional `daylight_ET_from_instantaneous_LE` |
+
+## 4. Validation Benchmark Summary
+
+### 4.1 Validation Datasets (Fisher et al., 2023)
+
+Fisher et al. (2023) evaluated the operational AquaSEBS formulation across **19 global open-water sites** spanning **1986–2019** and **seven Köppen–Geiger climate zones** (`Cfa` $n=6$, `Dfb` $n=5$, `BWh` $n=3$, `BSk` $n=2$, `BSh` $n=1$, `BWk` $n=1$, `Dfa` $n=1$), compiled from the **Great Lakes Evaporation Network (GLEN)**, **USBR Open Water Evaporation Network (OWEN)**, **Zhao & Gao (2019)**, and **Collison (2019)**:
+
+- **In Situ Methods:** Eddy covariance ($n = 11$), Bowen ratio energy balance / BREB ($n = 5$), bulk mass transfer ($n = 2$), and floating evaporation pan ($n = 1$) across half-hourly ($n = 9$), hourly ($n = 1$), daily ($n = 1$), and monthly ($n = 8$) intervals.
+- **Sites:** American Falls (ID), Calm (FL), Cochiti (NM), Five-O (FL), Granite Island (MI), Kasumigaura (Japan), Kinneret (Israel), Lahontan (NV), Long Point (ON), Mead (NV/AZ), Mohave (NV/AZ), Nasser (Egypt), Ross Barnett (MS), Spectacle Reef (MI), Stannard Rock (MI), Starr (FL), Taihu (China), White Bear (MN), and White Shoal (MI).
+- **Satellite & Reanalysis Inputs:** Landsat 5/7/8 ARD ($30\text{ m}$, $5 \times 5$ pixel windows) + NCEP-NCAR Reanalysis I; Terra/Aqua MODIS (`MOD11A1` $1\text{ km}$ $3 \times 3$ windows, `MCD43A3`, `MOD07_L2`, `MOD04_L2`/`MOD06_L2` FLiES/BESS) + NCEP-NCAR wind speed across **686 cloud-free instantaneous scenes** and **52 cloud-free daily/monthly scenes**.
+
+### 4.2 Quantitative Performance Metrics
+
+#### Fisher et al. (2023) Global Satellite Validation
+
+| Evaluation Regime | Sensor | $r^2$ | RMSE | Bias | Linear Fit |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **Instantaneous (High-wind filtered, $u \le 7.5\text{ m}\cdot\text{s}^{-1}$)** | MODIS ($1\text{ km}$) | $0.71$ | $53.7\text{ W}\cdot\text{m}^{-2}$ ($38\%$ of mean) | $-19.14\text{ W}\cdot\text{m}^{-2}$ ($13\%$ of mean) | $y = 0.8x + 3.0$ |
+| **Instantaneous (Unfiltered, all wind speeds)** | MODIS ($1\text{ km}$) | $0.47$ | $84.4\text{–}95.4\text{ W}\cdot\text{m}^{-2}$ ($62\%$ of mean) | $-49.5\text{ W}\cdot\text{m}^{-2}$ ($36\%$ of mean) | $y = 0.6x + 13.0$ |
+| **Daily Evaporation** | MODIS ($1\text{ km}$) | $0.47$ | $1.5\text{ mm}\cdot\text{day}^{-1}$ ($41\%$ of mean) | $-0.03\text{ to }+0.19\text{ mm}\cdot\text{day}^{-1}$ ($1\%$ of mean) | $y = 0.96x + 0.4$ |
+| **Daily Evaporation** | Landsat ($30\text{ m}$) | $0.56$ | $1.2\text{ mm}\cdot\text{day}^{-1}$ ($38\%$ of mean) | $-0.82\text{ mm}\cdot\text{day}^{-1}$ ($26\%$ of mean) | $y = 0.78x + 0.1$ |
+
+#### Abdelrady et al. (2016) Reanalysis & Field Benchmarks
+
+- **Water Heat Flux ($G_{0w}$) vs. ECMWF ERA-Interim:** $\text{rRMSE} = 4.3\%\text{–}8.5\%$ ($\text{RMSE} = 26.5\text{–}68.5\text{ W}\cdot\text{m}^{-2}$) across five seas/oceans ($n \approx 1005$).
+- **Freshwater Lakes:** Lake Tana in situ $\text{LE}$ $R^2 = 0.98$, $\text{RMSE} = 35.6\text{ W}\cdot\text{m}^{-2}$ ($\text{rRMSE} = 10.3\%$); Lake Victoria daily $E$ $\text{RMSE} = 1.5\text{ mm}\cdot\text{day}^{-1}$ ($\text{rRMSE} = 7.4\%$).
+- **Hypersaline Water:** Great Salt Lake ($S = 240\text{ g}\cdot\text{L}^{-1}$) salinity correction reduced evaporation by $26.5\%$, improving 3-hourly $\text{RMSE}$ from $0.63$ to $0.38\text{ mm}\cdot(3\text{ h})^{-1}$.
+
+### 4.3 Key Findings & Machine Learning Benchmark
+
+- **High-Wind Regime Shift ($u > 7.5\text{ m}\cdot\text{s}^{-1}$):** Instantaneous evaporation shifts from radiatively controlled to aerodynamically controlled during strong winds, causing the Priestley–Taylor formulation to underestimate high-wind peaks ($r^2$ drops from $0.71$ to $0.47$). Daily integration buffers short-term wind spikes ($\text{RMSE} = 1.2\text{–}1.5\text{ mm}\cdot\text{day}^{-1}$).
+- **Spatial Resolution Gains:** $30\text{ m}$ Landsat improved daily $r^2$ ($0.56$ vs. $0.47$) and lowered $\text{RMSE}$ ($1.2$ vs. $1.5\text{ mm}\cdot\text{day}^{-1}$) relative to $1\text{ km}$ MODIS while resolving bathymetric and circulation-driven thermal gradients.
+- **Machine Learning Benchmark:** None of 11 benchmarked ML models outperformed mechanistic AquaSEBS across the 19 sites. A two-layer TensorFlow Neural Network explained $74\%$ of instantaneous residual variance ($r^2 = 0.74$), with OLS regression confirming **wind speed** ($\text{coef} = +20.10, p < 0.001$) and **relative humidity** ($\text{coef} = -1.56, p < 0.001$) as the primary statistical error predictors, and no significant bias by waterbody area or shape.
+
+## 5. Scientific Caveats and Methodological Limitations
+
+1. **Freshwater Default Without `salinity_gL`:** When `salinity_gL=None` (default, preserving ECOSTRESS Collection 3 `BuildID 0700` consistency), runs assume freshwater ($S = 0$). Supply `salinity_gL` ($\text{g}\cdot\text{L}^{-1}$) over marine or hypersaline waters to apply the Turk (1970) reduction factor $\sigma$.
+2. **High-Wind Regime Shift ($u > 7.5\text{ m}\cdot\text{s}^{-1}$):** Instantaneous retrievals during strong wind events ($u > 7.5\text{ m}\cdot\text{s}^{-1}$ daily mean) underestimate aerodynamically driven evaporation. Use the returned `"high_wind_flag"` diagnostic mask to screen or weight instantaneous scenes, or rely on daily integrated totals.
+3. **Skin Temperature vs. Bathymetry & Thermal Storage Lag:** ETM estimates instantaneous $W$ from skin temperature ($T_0$) without parameterizing lake depth, stratification, or mixed-layer thickness, which governs diurnal hysteresis in shallow lakes versus deep oceans.
+4. **Dew-Point Estimation in Arid Climates:** By default (`dewpoint_method="linear"`), `water_heat_flux()` estimates dew point via $T_d \approx T_a - (100 - 100 \cdot \text{RH}) / 5.0$ for Collection 3 baseline parity. Supply explicit `Td_C` or set `dewpoint_method="magnus_tetens"` in arid environments ($\text{RH} < 50\%$).
+5. **Thermal Sensor Accuracy & Cloud Screening:** $W$ is most sensitive to water surface temperature ($T_0$), requiring thermal accuracy within $\pm 0.3\text{--}0.5\text{ K}$ and strict cloud masking.
+6. **Shoreline Adjacency, Lateral Advection & Validation Coverage:** Coarse pixels near shorelines or fluctuating reservoir drawdowns can suffer land contamination and lateral dry-air advection; validation sites in Fisher et al. (2023) also lack polar, tropical equatorial, and high-altitude coverage.
+
+## 6. Repository Release and Commit History
+
+| Release Tag | Release Date (UTC) | Release Title | Core Milestone |
+| :--- | :--- | :--- | :--- |
+| **`v1.0.1`** | 2025-09-30T22:07:17Z | initial release | Initial implementation of Equilibrium Temperature Model (`water_heat_flux`), Verma net radiation + Priestley–Taylor energy balance (`AquaSEBS`), `NASADEM.swb` water masking, and dictionary return schema |
+| **`v1.0.2`** | 2025-10-08T17:14:34Z | documentation | Package documentation updates (version bump in `pyproject.toml`) |
+| **`v1.1.0`** | 2025-11-11T19:49:53Z | daylight upscaling | Added `upscale_to_daylight` flag, `daylight_ET_from_instantaneous_LE()` integration, and `TicToc` execution timing |
+| **`v1.2.0`** | 2026-01-21T21:14:40Z | offline mode | Added `offline_mode` parameter and `MissingOfflineParameter` exception for `Ta_C`, `SWin_Wm2`, and `verma_net_radiation()` |
+| **`v1.3.0`** | 2026-01-21T21:55:38Z | `GEOS5FP_INPUTS` constant | Added `GEOS5FP_INPUTS = ["Ta_C"]` to `AquaSEBS/constants.py` |
+| **`v1.4.0`** | 2026-11-25 | offline mode, Collection 3 resilience & opt-in science diagnostics | Completed `offline_mode`, lazy `GEOS5FP`, parameter forwarding (`#6`, `#7`), graceful all-`NaN` handling on zero-water scenes (`#14`), `GEOS5FP.wind_speed_mps()` update (`#15`), opt-in `salinity_gL` (`#11`), opt-in `dewpoint_method="magnus_tetens"` (`#12`), diagnostic `"high_wind_flag"` (`#13`), `README.md` LaTeX cleanup (`#16`), and full `pytest` suite (`#8`–`#10`) |
+
+## 7. Contributing, License, and Links
+
+### Contributing
+
+Contributions are welcome via pull requests to [JPL-Evapotranspiration-Algorithms/AquaSEBS](https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS). Please ensure `make test` passes before submitting changes.
+
+### License
+
+This project is licensed under the **Apache License 2.0** — see the [LICENSE](LICENSE) file for details.
+
+### Links
+
+- **Homepage:** https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS
+- **PyPI:** https://pypi.org/project/AquaSEBS/
+- **Issues:** https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS/issues
