@@ -36,19 +36,16 @@ import numpy as np
 from datetime import datetime
 import logging
 from pytictoc import TicToc
-import rasters as rt
 from rasters import Raster, RasterGeometry
 from NASADEM import NASADEM
 from GEOS5FP import GEOS5FP
 from check_distribution import check_distribution
-from priestley_taylor import epsilon_from_Ta_C, GAMMA_PA, PT_ALPHA
+from priestley_taylor import epsilon_from_Ta_C, GAMMA_PA, PT_ALPHA, priestley_taylor
 from verma_net_radiation import verma_net_radiation
-from priestley_taylor import priestley_taylor
 from daylight_evapotranspiration import daylight_ET_from_instantaneous_LE
 
-from .constants import *
-from .exceptions import *
-
+from .constants import RESAMPLING_METHOD, MASK_NON_WATER_PIXELS, UPSCALE_TO_DAYLIGHT
+from .exceptions import MissingOfflineParameter
 from .water_heat_flux import water_heat_flux
 
 logger = logging.getLogger(__name__)
@@ -112,17 +109,17 @@ def AquaSEBS(
            Fisher, 2018; Fisher et al., 2023).
 
     Scientific Caveats & Validation Benchmarks:
-        - **High-Wind Regime Shift**: Across 19 global validation sites, Fisher
-          et al. (2023) found that instantaneous AquaSEBS accuracy degrades during
-          high-wind events (u > 7.5 m s^-1 daily mean; r^2 drops from 0.71 to 0.47,
-          RMSE rises from 38% to 62% of mean) as evaporation shifts from radiatively
-          controlled to atmospherically/aerodynamically controlled. Temporal
-          integration to daily totals buffers this sensitivity (daily RMSE =
-          1.2-1.5 mm day^-1).
-        - **Salinity**: This function computes freshwater potential evaporation.
-          For saline or hypersaline waters, evaporation is reduced by Raoult's law
-          vapor-pressure depression (up to ~27% in the Great Salt Lake; Abdelrady
-          et al., 2016, Eqs. 19-20).
+        - **High-Wind Regime Shift (Issue #13)**: Across 19 global validation sites,
+          Fisher et al. (2023) found that instantaneous AquaSEBS accuracy degrades
+          during high-wind events (u > 7.5 m s^-1 daily mean; r^2 drops from 0.71
+          to 0.47, RMSE rises from 38% to 62% of mean) as evaporation shifts from
+          radiatively controlled to atmospherically/aerodynamically controlled.
+          Temporal integration to daily totals buffers this sensitivity (daily
+          RMSE = 1.2-1.5 mm day^-1).
+        - **Salinity (Issue #11)**: This function computes freshwater potential
+          evaporation. For saline or hypersaline waters, evaporation is reduced by
+          Raoult's law vapor-pressure depression (up to ~27% in the Great Salt Lake;
+          Abdelrady et al., 2016, Eqs. 19-20).
         - **Thermal Sensitivity**: Water heat flux W is the primary source of
           propagated uncertainty and is most sensitive to water surface temperature
           WST_C (Abdelrady et al., 2016, Section 4.6).
@@ -135,21 +132,24 @@ def AquaSEBS(
             emissivity (dimensionless, 0-1). Required if `Rn_Wm2` is not provided.
         albedo (Union[Raster, np.ndarray], optional): Broadband shortwave surface
             albedo (dimensionless, 0-1; typical open water values 0.05-0.15).
-            Required if `Rn_Wm2` is not provided.
+            Required if `Rn_Wm2` is not provided; also forwarded to
+            `water_heat_flux` when `SWnet` is omitted.
         Ta_C (Union[Raster, np.ndarray], optional): Near-surface air temperature in
             degrees Celsius (°C). Automatically retrieved from GEOS-5 FP if omitted
-            and `geometry` + `time_UTC` are provided.
+            and `geometry` + `time_UTC` are provided (when `offline_mode=False`).
         RH (Union[Raster, np.ndarray], optional): Near-surface relative humidity as
-            a fraction (0-1). Automatically retrieved from GEOS-5 FP if omitted.
+            a fraction (0-1). Automatically retrieved from GEOS-5 FP if omitted
+            (when `offline_mode=False`) and forwarded to `verma_net_radiation`
+            and `water_heat_flux`.
         Td_C (Union[Raster, np.ndarray], optional): Near-surface dew-point
             temperature in degrees Celsius (°C). Estimated from `Ta_C` and `RH` if
             omitted.
         windspeed_mps (Union[Raster, np.ndarray], optional): Wind speed at reference
             height in meters per second (m s^-1). Automatically retrieved from
-            GEOS-5 FP if omitted.
+            GEOS-5 FP if omitted (when `offline_mode=False`).
         SWnet (Union[Raster, np.ndarray], optional): Net shortwave radiation absorbed
             by the water surface in Watts per square meter (W m^-2). Computed from
-            incoming shortwave and albedo if omitted.
+            `SWin_Wm2` and `albedo` if omitted.
         Rn_Wm2 (Union[Raster, np.ndarray], optional): Instantaneous broadband net
             radiation at the water surface in Watts per square meter (W m^-2).
             Computed via `verma_net_radiation` if omitted.
@@ -159,7 +159,7 @@ def AquaSEBS(
             atmosphere. Computed via `water_heat_flux` (ETM) if omitted.
         SWin_Wm2 (Union[Raster, np.ndarray], optional): Incoming solar (shortwave)
             radiation in Watts per square meter (W m^-2). Retrieved from GEOS-5 FP
-            if omitted when computing `Rn_Wm2`.
+            if omitted when computing `Rn_Wm2` or `SWnet` (when `offline_mode=False`).
         geometry (RasterGeometry, optional): Spatial grid definition (`rasters.RasterGeometry`).
             Inferred automatically from `WST_C.geometry` when `WST_C` is a `Raster`.
         time_UTC (datetime, optional): UTC timestamp of the observation/overpass,
@@ -167,9 +167,11 @@ def AquaSEBS(
             integration.
         water (Union[Raster, np.ndarray], optional): Boolean or binary open-water
             mask (True/1 = water, False/0 = land). Automatically retrieved from
-            NASADEM Surface Water Body (`NASADEM.swb`) when `geometry` is provided.
+            NASADEM Surface Water Body (`NASADEM.swb`) when `mask_non_water_pixels=True`,
+            `geometry` is provided, and `offline_mode=False`.
         GEOS5FP_connection (GEOS5FP, optional): Existing `GEOS5FP` data client
-            instance for meteorological forcing queries. Created if None.
+            instance for meteorological forcing queries. Created lazily only if a
+            network retrieval is needed.
         α (Union[Raster, np.ndarray, float], optional): Priestley-Taylor advection-
             aridity coefficient (dimensionless). Defaults to `PT_ALPHA` (1.26)
             for open water surfaces (Priestley & Taylor, 1972; Fisher et al., 2023).
@@ -186,8 +188,8 @@ def AquaSEBS(
             NaN using the `water` mask inside `water_heat_flux`. Defaults to
             `MASK_NON_WATER_PIXELS` (True).
         offline_mode (bool, optional): If True, disables network retrievals from
-            GEOS-5 FP and raises `MissingOfflineParameter` if required inputs are
-            missing. Defaults to False.
+            GEOS-5 FP and NASADEM, raising `MissingOfflineParameter` if required
+            inputs are missing. Defaults to False.
 
     Returns:
         Dict[str, Union[Raster, np.ndarray, float]]: Dictionary containing instantaneous
@@ -196,20 +198,20 @@ def AquaSEBS(
             - `LE_Wm2`: Instantaneous latent heat flux (W m^-2).
             - `LE_potential_Wm2`: Potential latent heat flux from Priestley-Taylor (W m^-2).
             - `W_Wm2`: Instantaneous water heat flux (W m^-2).
+            - `G_Wm2`: Ground/water heat flux passed into Priestley-Taylor (W m^-2).
             - `Rn_Wm2`: Instantaneous net radiation (W m^-2).
             - `epsilon`: Psychrometric energy partitioning factor Delta / (Delta + gamma).
             - `Tn`, `η`, `S`, `β`, `Te`: Intermediate ETM parameters (when `W_Wm2`
               is computed internally).
 
     Raises:
-        ValueError: If required inputs (`WST_C` or `Rn_Wm2` when radiation inputs are
-            insufficient) are missing.
-        MissingOfflineParameter: If `offline_mode=True` and required meteorological
-            or radiative forcings (`Ta_C`, `SWin_Wm2`, etc.) are not supplied.
+        ValueError: If required inputs (`WST_C`, `Ta_C`, or `Rn_Wm2` when radiation
+            inputs are insufficient) cannot be resolved when `offline_mode=False`.
+        MissingOfflineParameter: If `offline_mode=True` and required meteorological,
+            radiative, or water-mask inputs are not supplied.
 
     Examples:
         >>> import numpy as np
-        >>> from datetime import datetime
         >>> from AquaSEBS import AquaSEBS
         >>> results = AquaSEBS(
         ...     WST_C=np.array([[22.0, 23.5]]),
@@ -221,8 +223,15 @@ def AquaSEBS(
         ...     mask_non_water_pixels=False,
         ...     offline_mode=True
         ... )
-        >>> results["LE_Wm2"]
+        >>> results["LE_Wm2"].shape
+        (1, 2)
     """
+    def _get_geos5fp() -> GEOS5FP:
+        nonlocal GEOS5FP_connection
+        if GEOS5FP_connection is None:
+            GEOS5FP_connection = GEOS5FP()
+        return GEOS5FP_connection
+
     # Initialize dictionary to accumulate all radiation, water heat flux, latent heat,
     # and optional daylight-upscaled output products
     results = {}
@@ -232,55 +241,55 @@ def AquaSEBS(
     if geometry is None and isinstance(WST_C, Raster):
         geometry = WST_C.geometry
 
-    # Initialize connection to NASA GEOS-5 FP atmospheric assimilation system
-    # for meteorological and radiative forcing retrieval when inputs are omitted
-    if GEOS5FP_connection is None:
-        GEOS5FP_connection = GEOS5FP()
-
     # Water surface skin temperature (T0 / WST_C) is the primary remote-sensing thermal
     # state variable driving both longwave emission and air-water heat exchange
     # (Abdelrady et al., 2016, Section 2.2.1; Fisher et al., 2023)
     if WST_C is None:
         raise ValueError("water surface temperature (WST_C) not given")
-    
+
     check_distribution(WST_C, "WST_C")
 
     # Retrieve the static open-water mask from the NASADEM Surface Water Body (SWB)
-    # product so terrestrial land pixels can be excluded from open-water energy balance
-    # calculations (Fisher et al., 2023, Methods)
-    if water is None and geometry is not None:
-        water = NASADEM.swb(geometry=geometry)
-        check_distribution(water, "water")
+    # product only when masking is enabled and a mask was not provided
+    if mask_non_water_pixels and water is None:
+        if offline_mode:
+            raise MissingOfflineParameter("offline mode is enabled but water mask is not provided")
+        if geometry is not None:
+            water = NASADEM.swb(geometry=geometry)
+            check_distribution(water, "water")
 
     # Retrieve near-surface air temperature (Ta_C) from GEOS-5 FP reanalysis if not
     # supplied; Ta_C governs saturation vapor pressure slope (Delta) and dew-point estimation
-    if Ta_C is None and geometry is not None and time_UTC is not None:
+    if Ta_C is None:
         if offline_mode:
             raise MissingOfflineParameter("offline mode is enabled but Ta_C is not provided")
-        
-        Ta_C = GEOS5FP_connection.Ta_C(
-            time_UTC=time_UTC,
-            geometry=geometry,
-            resampling=resampling
-        )
+        if geometry is not None and time_UTC is not None:
+            Ta_C = _get_geos5fp().Ta_C(
+                time_UTC=time_UTC,
+                geometry=geometry,
+                resampling=resampling
+            )
+
+    if Ta_C is None:
+        raise ValueError("air temperature (Ta_C) not given")
 
     check_distribution(Ta_C, "Ta_C")
 
     # Compute broadband net radiation Rn = (1 - albedo) * SWin + LWin - LWout
     # (Abdelrady et al., 2016, Eq. 1) using the Verma et al. (2016) parameterization
     # when Rn_Wm2 is not supplied directly
-    if Rn_Wm2 is None and albedo is not None and WST_C is not None and emissivity is not None and geometry is not None and time_UTC is not None:
+    if Rn_Wm2 is None and albedo is not None and emissivity is not None and geometry is not None and time_UTC is not None:
         # Retrieve incoming downwelling shortwave radiation (SWin) from GEOS-5 FP if omitted
-        if SWin_Wm2 is None and geometry is not None and time_UTC is not None:
+        if SWin_Wm2 is None:
             if offline_mode:
                 raise MissingOfflineParameter("offline mode is enabled but SWin_Wm2 is not provided")
-        
-            SWin_Wm2 = GEOS5FP_connection.SWin(
+
+            SWin_Wm2 = _get_geos5fp().SWin(
                 time_UTC=time_UTC,
                 geometry=geometry,
                 resampling=resampling
             )
-        
+
         check_distribution(SWin_Wm2, "SWin_Wm2")
 
         # Calculate net shortwave, net longwave, and total net radiation (Rn_Wm2)
@@ -317,21 +326,25 @@ def AquaSEBS(
     if W_Wm2 is None:
         water_heat_flux_results = water_heat_flux(
             WST_C=WST_C,
+            albedo=albedo,
             Ta_C=Ta_C,
+            RH=RH,
             Td_C=Td_C,
             windspeed_mps=windspeed_mps,
             SWnet=SWnet,
+            SWin_Wm2=SWin_Wm2,
             geometry=geometry,
             time_UTC=time_UTC,
             water=water,
             GEOS5FP_connection=GEOS5FP_connection,
             resampling=resampling,
-            mask_non_water_pixels=mask_non_water_pixels
+            mask_non_water_pixels=mask_non_water_pixels,
+            offline_mode=offline_mode
         )
-        
+
         W_Wm2 = water_heat_flux_results["W_Wm2"]
         results.update(water_heat_flux_results)
-    
+
     check_distribution(W_Wm2, "W_Wm2")
 
     # Calculate the dimensionless psychrometric energy-partitioning ratio:
@@ -364,7 +377,7 @@ def AquaSEBS(
     check_distribution(LE_Wm2, "LE_Wm2")
     results.update(priestley_taylor_results)
     results["LE_Wm2"] = LE_Wm2
-    
+
     # Optionally upscale instantaneous overpass latent heat flux (W m^-2) to daylight
     # integrated evapotranspiration totals by modeling diurnal net radiation sinusoidally
     # from date and solar geometry while preserving the instantaneous evaporative fraction

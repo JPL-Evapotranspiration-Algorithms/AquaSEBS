@@ -7,12 +7,19 @@ PYTHON_VERSION = $(if $(PYTHON),$(PYTHON),3.14)
 # Allow passing extra flags via command line: make <target> ARGS="-k test_name"
 ARGS ?=
 
+# Allow passing VERSION via make set-version VERSION=x.y.z or make set-version x.y.z
+ifeq (set-version,$(firstword $(MAKECMDGOALS)))
+  VERSION_ARG := $(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+  $(eval $(VERSION_ARG):;@:)
+endif
+VERSION ?= $(VERSION_ARG)
+
 # Include a Makefile.local to override things, if found
 -include Makefile.local
 
 .DEFAULT_GOAL := help
 
-.PHONY: help clean test wheel sdist build twine-upload dist \
+.PHONY: help clean test wheel sdist build twine-upload dist set-version \
         install uninstall reinstall environment remove-environment \
         repomix generate-history show-issues
 
@@ -53,6 +60,25 @@ test: ## Run Python unit tests using pytest
 	pytest -vv -p no:warnings $(ARGS)
 
 ##@ Packaging & Release
+set-version: ## Set package version across pyproject.toml, CITATION.cff, and README.md (usage: make set-version VERSION=1.3.2)
+	@test -n "$(VERSION)" || (echo "Error: VERSION is required (e.g., make set-version VERSION=1.3.2)" && exit 1)
+	@python -c 'import re, sys; from datetime import date; from pathlib import Path; \
+		v = sys.argv[1]; \
+		today = date.today().isoformat(); \
+		p = Path("pyproject.toml"); \
+		p.write_text(re.sub(r"(?m)^(version\s*=\s*\")[^\"]+(\")", rf"\g<1>{v}\g<2>", p.read_text())); \
+		c = Path("CITATION.cff"); \
+		ct = re.sub(r"(?m)^(\s*version:\s*)\S+", rf"\g<1>{v}", c.read_text()); \
+		ct = re.sub(r"(?m)^(date-released:\s*)\S+", rf"\g<1>{today}", ct); \
+		c.write_text(ct); \
+		r = Path("README.md"); \
+		rt = r.read_text(); \
+		rt = re.sub(r"(version=\{)[^}]+(\})", rf"\g<1>{v}\g<2>", rt); \
+		rt = re.sub(r"(Version `)[^`]+(`)", rf"\g<1>{v}\g<2>", rt); \
+		rt = re.sub(r"(Implemented Code \(`v)[^`]+(`\))", rf"\g<1>{v}\g<2>", rt); \
+		r.write_text(rt); \
+		print(f"Updated version to {v} (date-released: {today}) in pyproject.toml, CITATION.cff, and README.md")' "$(VERSION)"
+
 wheel: ## Build the Python wheel
 	python -m build --wheel
 

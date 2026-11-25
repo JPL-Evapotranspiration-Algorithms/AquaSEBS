@@ -37,7 +37,8 @@ from NASADEM import NASADEM
 from GEOS5FP import GEOS5FP
 from check_distribution import check_distribution
 
-from .constants import *
+from .constants import RESAMPLING_METHOD, MASK_NON_WATER_PIXELS
+from .exceptions import MissingOfflineParameter
 
 
 def water_heat_flux(
@@ -48,12 +49,14 @@ def water_heat_flux(
         Td_C: Union[Raster, np.ndarray] = None,
         windspeed_mps: Union[Raster, np.ndarray] = None,
         SWnet: Union[Raster, np.ndarray] = None,
+        SWin_Wm2: Union[Raster, np.ndarray] = None,
         geometry: RasterGeometry = None,
         time_UTC: datetime = None,
         water: Union[Raster, np.ndarray] = None,
         GEOS5FP_connection: GEOS5FP = None,
         resampling: str = RESAMPLING_METHOD,
-        mask_non_water_pixels: bool = MASK_NON_WATER_PIXELS) -> Dict[str, Union[Raster, np.ndarray, float]]:
+        mask_non_water_pixels: bool = MASK_NON_WATER_PIXELS,
+        offline_mode: bool = False) -> Dict[str, Union[Raster, np.ndarray, float]]:
     """
     Calculate instantaneous water heat flux (`W_Wm2`) using the AquaSEBS
     Equilibrium Temperature Model (ETM).
@@ -103,7 +106,8 @@ def water_heat_flux(
         - **Dew-Point Approximation**: When `Td_C` is omitted, it is estimated
           from `Ta_C` and `RH` via `Td_C = Ta_C - ((100 - RH * 100) / 5.0)`.
           This linear approximation is most accurate at moderate-to-high relative
-          humidity (RH > 50%) and diverges under very arid conditions.
+          humidity (RH > 50%) and diverges under very arid conditions (tracked in
+          Issue #12).
         - **Bathymetry & Mixing Depth**: ETM does not explicitly parameterize
           water column depth or vertical mixing layer thickness, which governs
           diurnal heat storage hysteresis in shallow lakes versus deep oceans
@@ -113,38 +117,47 @@ def water_heat_flux(
         WST_C (Union[Raster, np.ndarray]): Water surface skin temperature in degrees
             Celsius (°C). Required.
         albedo (Union[Raster, np.ndarray], optional): Broadband shortwave surface
-            albedo (dimensionless, 0-1). Used to compute `SWnet = SWin * (1 - albedo)`
-            when `SWnet` is omitted; retrieved from GEOS-5 FP if needed.
+            albedo (dimensionless, 0-1). Used to compute `SWnet = SWin_Wm2 * (1 - albedo)`
+            when `SWnet` is omitted; retrieved from GEOS-5 FP if needed and
+            `offline_mode=False`.
         Ta_C (Union[Raster, np.ndarray], optional): Near-surface air temperature in
             degrees Celsius (°C). Retrieved from GEOS-5 FP if omitted when `Td_C`
-            must be estimated.
+            must be estimated and `offline_mode=False`.
         RH (Union[Raster, np.ndarray], optional): Near-surface relative humidity as
             a fraction (0-1). Retrieved from GEOS-5 FP if omitted when `Td_C` must
-            be estimated.
+            be estimated and `offline_mode=False`.
         Td_C (Union[Raster, np.ndarray], optional): Near-surface air dew-point
             temperature in degrees Celsius (°C). Estimated from `Ta_C` and `RH` if
             omitted.
         windspeed_mps (Union[Raster, np.ndarray], optional): Wind speed at reference
             height in meters per second (m s^-1). Retrieved from GEOS-5 FP if
-            omitted.
+            omitted and `offline_mode=False`.
         SWnet (Union[Raster, np.ndarray], optional): Net shortwave solar radiation
             absorbed by the water surface in Watts per square meter (W m^-2).
-            Computed from GEOS-5 FP incoming shortwave and albedo if omitted.
+            Computed from `SWin_Wm2` (or GEOS-5 FP incoming shortwave) and `albedo`
+            if omitted.
+        SWin_Wm2 (Union[Raster, np.ndarray], optional): Downwelling shortwave solar
+            radiation in Watts per square meter (W m^-2). Used with `albedo` to
+            compute `SWnet` when `SWnet` is omitted; retrieved from GEOS-5 FP if
+            omitted and `offline_mode=False`.
         geometry (RasterGeometry, optional): Spatial grid definition (`rasters.RasterGeometry`).
             Inferred automatically from `WST_C.geometry` if `WST_C` is a `Raster`.
         time_UTC (datetime, optional): UTC timestamp of the observation, required
             when retrieving missing meteorological/radiative inputs from GEOS-5 FP.
         water (Union[Raster, np.ndarray], optional): Boolean or binary open-water
             mask (True/1 = water, False/0 = land). Retrieved from NASADEM Surface
-            Water Body (`NASADEM.swb`) when `mask_non_water_pixels=True` and
-            `geometry` is provided.
+            Water Body (`NASADEM.swb`) when `mask_non_water_pixels=True`,
+            `geometry` is provided, and `offline_mode=False`.
         GEOS5FP_connection (GEOS5FP, optional): Existing `GEOS5FP` assimilation
-            client instance. Created automatically if None.
+            client instance. Created lazily only when a network retrieval is needed.
         resampling (str, optional): Spatial resampling method when reprojecting
             GEOS-5 FP grids onto `geometry`. Defaults to `RESAMPLING_METHOD` ("cubic").
         mask_non_water_pixels (bool, optional): If True, masks non-water pixels in
             `WST_C` to NaN using the `water` mask so land pixels are excluded from
             ETM outputs. Defaults to `MASK_NON_WATER_PIXELS` (True).
+        offline_mode (bool, optional): If True, disables network retrievals from
+            GEOS-5 FP and NASADEM, raising `MissingOfflineParameter` if required
+            inputs are missing. Defaults to False.
 
     Returns:
         Dict[str, Union[Raster, np.ndarray, float]]: Dictionary containing masked
@@ -164,7 +177,10 @@ def water_heat_flux(
 
     Raises:
         ValueError: If `WST_C`, `Td_C`, `windspeed_mps`, or `SWnet` cannot be
-            resolved from direct arguments or `GEOS5FP` retrieval.
+            resolved when `offline_mode=False` (e.g., missing `geometry`/`time_UTC`).
+        MissingOfflineParameter: If `offline_mode=True` and required inputs
+            (`water` when masking, `Ta_C`, `RH`, `windspeed_mps`, `SWin_Wm2`,
+            or `albedo`) are omitted.
 
     Examples:
         >>> import numpy as np
@@ -177,67 +193,79 @@ def water_heat_flux(
         ...     mask_non_water_pixels=False
         ... )
         >>> round(float(out["W_Wm2"][0]), 2)
-        294.75
+        331.15
     """
+    def _get_geos5fp() -> GEOS5FP:
+        nonlocal GEOS5FP_connection
+        if GEOS5FP_connection is None:
+            GEOS5FP_connection = GEOS5FP()
+        return GEOS5FP_connection
+
     # Infer spatial grid geometry from the thermal water surface temperature Raster
     # when an explicit RasterGeometry is not supplied
     if geometry is None and isinstance(WST_C, Raster):
         geometry = WST_C.geometry
-
-    # Initialize connection to NASA GEOS-5 FP atmospheric assimilation product for
-    # retrieving missing meteorological and shortwave radiative forcings
-    if GEOS5FP_connection is None:
-        GEOS5FP_connection = GEOS5FP()
 
     # Water surface skin temperature (T0 / WST_C) is the primary remote-sensing state
     # variable and dominant sensitivity driver of the Equilibrium Temperature Model
     # (Abdelrady et al., 2016, Section 4.6)
     if WST_C is None:
         raise ValueError("water surface temperature (WST_C) not given")
-    
+
     check_distribution(WST_C, "WST_C")
 
     # Retrieve static open-water extent from the NASADEM Surface Water Body (SWB)
     # dataset to prevent terrestrial land thermal signatures from contaminating
     # open-water heat flux estimates (Fisher et al., 2023, Methods)
-    if water is None and geometry is not None and mask_non_water_pixels:
-        water = NASADEM.swb(geometry=geometry)
-        check_distribution(water, "water")
-    
-    # Apply open-water mask by setting non-water pixels to NaN; NaNs propagate
-    # cleanly through all downstream ETM equations
     if mask_non_water_pixels:
+        if water is None:
+            if offline_mode:
+                raise MissingOfflineParameter("offline mode is enabled but water mask is not provided")
+            if geometry is not None:
+                water = NASADEM.swb(geometry=geometry)
+                check_distribution(water, "water")
+            else:
+                raise ValueError("water mask not given and geometry not available for NASADEM.swb lookup")
+
+        # Apply open-water mask by setting non-water pixels to NaN; NaNs propagate
+        # cleanly through all downstream ETM equations
         WST_C = rt.where(water, WST_C, np.nan)
 
     # Estimate near-surface air dew-point temperature (Td_C) from air temperature
     # and relative humidity if Td_C is not provided directly; Td_C sets the lower
     # thermodynamic baseline for equilibrium water temperature (Abdelrady et al.,
     # 2016, Eq. 8 & Eq. 12)
-    if Td_C is None and geometry is not None and time_UTC is not None:
-        # Retrieve near-surface air temperature (Ta_C) from GEOS-5 FP if omitted
+    if Td_C is None:
         if Ta_C is None:
-            Ta_C = GEOS5FP_connection.Ta_C(
-                time_UTC=time_UTC,
-                geometry=geometry,
-                resampling=resampling
-            )
+            if offline_mode:
+                raise MissingOfflineParameter("offline mode is enabled but Ta_C (or Td_C) is not provided")
+            if geometry is not None and time_UTC is not None:
+                Ta_C = _get_geos5fp().Ta_C(
+                    time_UTC=time_UTC,
+                    geometry=geometry,
+                    resampling=resampling
+                )
 
-        check_distribution(Ta_C, "Ta_C")
-        
-        # Retrieve near-surface relative humidity (RH, fraction 0-1) from GEOS-5 FP
-        if RH is None and geometry is not None and time_UTC is not None:
-            RH = GEOS5FP_connection.RH(
-                time_UTC=time_UTC,
-                geometry=geometry,
-                resampling=resampling
-            )
+        if Ta_C is not None:
+            check_distribution(Ta_C, "Ta_C")
 
-        check_distribution(RH, "RH")
+        if RH is None:
+            if offline_mode:
+                raise MissingOfflineParameter("offline mode is enabled but RH (or Td_C) is not provided")
+            if geometry is not None and time_UTC is not None:
+                RH = _get_geos5fp().RH(
+                    time_UTC=time_UTC,
+                    geometry=geometry,
+                    resampling=resampling
+                )
 
-        # Approximate dew-point temperature (°C) using the standard linear psychrometric
-        # rule-of-thumb: Td ≈ Ta - ((100 - RH%) / 5), where RH% = RH * 100
-        Td_C = Ta_C - ((100 - RH * 100) / 5.0)
-    
+        if RH is not None:
+            check_distribution(RH, "RH")
+
+        if Ta_C is not None and RH is not None:
+            # Approximate dew-point temperature (°C) using the standard linear psychrometric
+            # rule-of-thumb: Td ≈ Ta - ((100 - RH%) / 5), where RH% = RH * 100
+            Td_C = Ta_C - ((100 - RH * 100) / 5.0)
 
     if Td_C is None:
         raise ValueError("dew-point temperature (Td_C) not given")
@@ -248,12 +276,15 @@ def water_heat_flux(
     # wind speed controls turbulent mechanical mixing and convective vapor removal
     # across the air-water boundary layer (Abdelrady et al., 2016, Eq. 10;
     # Fisher et al., 2023, Table 2)
-    if windspeed_mps is None and geometry is not None and time_UTC is not None:
-        windspeed_mps = GEOS5FP_connection.wind_speed(
-            time_UTC=time_UTC,
-            geometry=geometry,
-            resampling=resampling
-        )
+    if windspeed_mps is None:
+        if offline_mode:
+            raise MissingOfflineParameter("offline mode is enabled but windspeed_mps is not provided")
+        if geometry is not None and time_UTC is not None:
+            windspeed_mps = _get_geos5fp().wind_speed(
+                time_UTC=time_UTC,
+                geometry=geometry,
+                resampling=resampling
+            )
 
     if windspeed_mps is None:
         raise ValueError("wind-speed (windspeed_mps) not given")
@@ -261,30 +292,40 @@ def water_heat_flux(
     check_distribution(windspeed_mps, "windspeed_mps")
 
     # Derive net shortwave solar radiation absorbed by the water surface:
-    #   SWnet = SWin * (1 - albedo)
-    # where SWin (W m^-2) is downwelling shortwave irradiance and albedo (0-1) is
+    #   SWnet = SWin_Wm2 * (1 - albedo)
+    # where SWin_Wm2 (W m^-2) is downwelling shortwave irradiance and albedo (0-1) is
     # broadband water surface reflectance (Abdelrady et al., 2016, Section 2.2.1;
     # Fisher et al., 2023, Methods)
-    if SWnet is None and geometry is not None and time_UTC is not None:
-        SWin = GEOS5FP_connection.SWin(
-            time_UTC=time_UTC,
-            geometry=geometry,
-            resampling=resampling
-        )
+    if SWnet is None:
+        if SWin_Wm2 is None:
+            if offline_mode:
+                raise MissingOfflineParameter("offline mode is enabled but SWin_Wm2 (or SWnet) is not provided")
+            if geometry is not None and time_UTC is not None:
+                SWin_Wm2 = _get_geos5fp().SWin(
+                    time_UTC=time_UTC,
+                    geometry=geometry,
+                    resampling=resampling
+                )
 
-        check_distribution(SWin, "SWin")
+        if SWin_Wm2 is not None:
+            check_distribution(SWin_Wm2, "SWin_Wm2")
 
         if albedo is None:
-            albedo = GEOS5FP_connection.ALBEDO(
-                time_UTC=time_UTC,
-                geometry=geometry,
-                resampling=resampling
-            )
-        
-        check_distribution(albedo, "albedo")
+            if offline_mode:
+                raise MissingOfflineParameter("offline mode is enabled but albedo (or SWnet) is not provided")
+            if geometry is not None and time_UTC is not None:
+                albedo = _get_geos5fp().ALBEDO(
+                    time_UTC=time_UTC,
+                    geometry=geometry,
+                    resampling=resampling
+                )
 
-        SWnet = SWin * (1 - albedo)
-    
+        if albedo is not None:
+            check_distribution(albedo, "albedo")
+
+        if SWin_Wm2 is not None and albedo is not None:
+            SWnet = SWin_Wm2 * (1 - albedo)
+
     if SWnet is None:
         raise ValueError("net shortwave radiation (SWnet) not given")
 
