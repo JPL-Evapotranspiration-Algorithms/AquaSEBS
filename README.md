@@ -1,6 +1,6 @@
 # AquaSEBS Water Surface Evaporation Python Package
 
-**AquaSEBS** (Aquatic Surface Energy Balance System) is a Python package for estimating instantaneous and daily open-water evaporation (latent heat flux) and surface energy balance components over lakes, reservoirs, inland seas, and coastal waters using thermal infrared satellite observations and meteorological inputs.
+**AquaSEBS** (Aquatic Surface Energy Balance System) is a Python implementation of the Abdelrady et al. (2016) and Fisher et al. (2023) methodology for estimating water surface evaporation and energy balance components over open water bodies using satellite remote sensing data and meteorological inputs. Developed and implemented by **Gregory H. Halverson** at NASA's Jet Propulsion Laboratory for the **ECOSTRESS** mission—and globally validated across 19 open-water sites by **Fisher et al. (2023)**—the package combines Abdelrady et al.'s Equilibrium Temperature Model (ETM) for water heat flux with the energy-limited Priestley–Taylor approach for open-water evaporation.
 
 **Author:** Gregory H. Halverson (they/them) — [gregory.h.halverson@jpl.nasa.gov](mailto:gregory.h.halverson@jpl.nasa.gov) — NASA Jet Propulsion Laboratory 321H
 
@@ -58,11 +58,13 @@ If you use `AquaSEBS` in your research, please cite the software package and the
 
 ### 1.1 Overview
 
-`AquaSEBS` implements the operational hybrid formulation validated across 19 global open-water sites in **Fisher et al. (2023)** and deployed in **NASA's ECOSTRESS Collection 2+** (`L3_ET_PT-JPL`) and the **OpenET** platform:
+Developed at NASA JPL for **ECOSTRESS Collection 2+** (`L3_ET_PT-JPL`) and deployed in the **OpenET** platform, `AquaSEBS` implements the operational hybrid open-water surface energy balance formulation validated across 19 global open-water sites in **Fisher et al. (2023)**:
 
 - **Water Heat Flux ($W$):** Computed via the **Equilibrium Temperature Model (ETM)** of Edinger et al. (1968) as adapted for remote sensing by Abdelrady et al. (2016, Eqs. 8–13).
 - **Latent Heat Flux ($LE$):** Computed via the energy-limited **Priestley–Taylor (1972)** equation ($\alpha = 1.26$) applied to net available energy $(R_n - W)$.
 - **Automated Data & Masking Integration:** Automatically retrieves missing meteorological and shortwave radiative forcings from NASA's **GEOS-5 FP** assimilation system and masks non-water pixels using the **NASADEM Surface Water Body (`NASADEM.swb`)** product.
+
+*(Note: Version `1.3.0` implements freshwater potential evaporation; the Turk [1970] salinity reduction factor from Abdelrady et al. [2016] is documented below and tracked for API integration in Issue #11.)*
 
 ### 1.2 Installation
 
@@ -295,7 +297,7 @@ Satellite thermal infrared remote sensing resolves spatial gradients in water su
 ### 2.2 Evolution of the AquaSEBS Framework
 
 1. **Original Formulation — Abdelrady et al. (2016):** Adapted Su's (2002) one-source **Surface Energy Balance System (SEBS)** for fresh and saline water bodies by replacing constant-fraction ground heat flux approximations ($G_0 = 0.5 R_n$) with Edinger et al.'s (1968) **Equilibrium Temperature Model (ETM)** for instantaneous water heat flux ($G_{0w}$), calibrating momentum and heat roughness lengths over Lake IJsselmeer ($z_{0m} = 0.0002\text{ m}$, $z_{0h} = 0.0001\text{ m}$, $kB^{-1} \approx 0.3$), defining water-specific wet/dry evaporative fraction bounds, and incorporating Turk's (1970) salinity reduction factor ($\sigma$).
-2. **Operational Remote-Sensing Hybrid — Fisher et al. (2023):** Coupled Abdelrady et al.'s (2016) exact 6-equation Equilibrium Temperature Model (ETM) for instantaneous water heat flux ($W$, denoted $G_{0w}$) with the **Priestley–Taylor (1972)** energy-limited formulation ($\alpha = 1.26$) for instantaneous latent heat flux ($LE$), paired with sinusoidal diurnal radiation scaling (Bisht et al., 2005; Fisher, 2018) for daily totals. This hybrid architecture is implemented in the `AquaSEBS` Python package.
+2. **JPL ECOSTRESS Adaptation & Global Validation — Halverson & Fisher et al. (2023):** Adapted by Gregory H. Halverson at NASA JPL for the ECOSTRESS mission and validated globally by Joshua B. Fisher et al. (2023), coupling Abdelrady et al.'s (2016) exact 6-equation Equilibrium Temperature Model (ETM) for instantaneous water heat flux ($W$, denoted $G_{0w}$) with the **Priestley–Taylor (1972)** energy-limited formulation ($\alpha = 1.26$) for instantaneous latent heat flux ($LE$), paired with sinusoidal diurnal radiation scaling (Bisht et al., 2005; Fisher, 2018) for daily totals.
 
 ### 2.3 Mathematical Formulation
 
