@@ -1,0 +1,74 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "AquaSEBS: Aquatic Surface Energy Balance System Water Surface Evaporation Model"
+type: software
+version: 1.3.0
+date-released: 2026-01-21
+license: Apache-2.0
+repository-code: "https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS"
+url: "https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS"
+authors:
+  - family-names: Halverson
+    given-names: Gregory H.
+    email: gregory.h.halverson@jpl.nasa.gov
+    affiliation: "NASA Jet Propulsion Laboratory"
+keywords:
+  - evapotranspiration
+  - open-water evaporation
+  - surface energy balance
+  - remote sensing
+  - hydrology
+  - AquaSEBS
+  - ECOSTRESS
+  - OpenET
+preferred-citation:
+  type: software
+  title: "AquaSEBS: Aquatic Surface Energy Balance System Water Surface Evaporation Model"
+  authors:
+    - family-names: Halverson
+      given-names: Gregory H.
+      email: gregory.h.halverson@jpl.nasa.gov
+      affiliation: "NASA Jet Propulsion Laboratory"
+  version: 1.3.0
+  year: 2026
+  url: "https://github.com/JPL-Evapotranspiration-Algorithms/AquaSEBS"
+  license: Apache-2.0
+references:
+  - type: article
+    title: "Surface Energy Balance of Fresh and Saline Waters: AquaSEBS"
+    authors:
+      - family-names: Abdelrady
+        given-names: Ahmed
+      - family-names: Timmermans
+        given-names: Joris
+      - family-names: Vekerdy
+        given-names: Zoltán
+      - family-names: Salama
+        given-names: Mhd. Suhyb
+    journal: "Remote Sensing"
+    volume: 8
+    issue: 7
+    start: 583
+    year: 2016
+    doi: "10.3390/rs8070583"
+  - type: article
+    title: "Remotely sensed terrestrial open water evaporation"
+    authors:
+      - family-names: Fisher
+        given-names: Joshua B.
+      - family-names: Dohlen
+        given-names: Matthew B.
+      - family-names: Halverson
+        given-names: Gregory H.
+      - family-names: Collison
+        given-names: Jacob W.
+      - family-names: Pearson
+        given-names: Christopher
+      - family-names: Huntington
+        given-names: Justin L.
+    journal: "Scientific Reports"
+    volume: 13
+    issue: 1
+    start: 8174
+    year: 2023
+    doi: "10.1038/s41598-023-34921-2"

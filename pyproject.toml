@@ -1,14 +1,14 @@
 [build-system]
 requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "AquaSEBS"
-version = "1.3.0"
-description = "Priestley-Taylor Jet Propulsion Laboratory Evapotranspiration Model"
+version = "1.3.1"
+description = "Aquatic Surface Energy Balance System (AquaSEBS) Water Surface Evaporation Model"
 readme = "README.md"
 authors = [
-    { name = "Gregory Halverson", email = "gregory.h.halverson@jpl.nasa.gov" },
-    { name = "Joshua B. Fisher", email = "jbfisher@chapman.edu" }
+    { name = "Gregory H. Halverson", email = "gregory.h.halverson@jpl.nasa.gov" }
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -17,23 +17,22 @@ classifiers = [
 dependencies = [
     "check-distribution",
     "daylight-evapotranspiration",
-    "ECOv002-CMR",
-    "ECOv002-granules>=1.2.1",
     "GEOS5FP",
     "NASADEM",
     "numpy",
     "priestley-taylor>=1.1.2",
-    "rasters"
+    "pytictoc",
+    "rasters",
+    "verma-net-radiation"
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 [project.optional-dependencies]
 dev = [
     "build",
+    "jupyter",
     "pytest>=6.0",
     "pytest-cov",
-    "jupyter",
-    "pytest",
     "twine"
 ]
 
