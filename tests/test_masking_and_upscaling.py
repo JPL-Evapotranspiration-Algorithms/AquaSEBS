@@ -106,12 +106,9 @@ def test_all_land_or_cloud_masked_water_returns_nan_without_blank_output_error(
         water_raster = Raster(np.zeros(shape, dtype=bool), geometry=geometry)
         wst_raster = Raster(np.full(shape, 34.0, dtype=np.float32), geometry=geometry)
     else:
-        water_raster = Raster(np.ones(shape, dtype=bool), geometry=geometry)
-        wst_data = np.full(shape, 34.0, dtype=np.float32)
-        wst_data[:, :] = np.nan
-        # Include at least one finite land pixel so initial check_distribution(WST_C) passes
         water_arr = np.ones(shape, dtype=bool)
         water_arr[0, 0] = False
+        wst_data = np.full(shape, np.nan, dtype=np.float32)
         wst_data[0, 0] = 32.0
         water_raster = Raster(water_arr, geometry=geometry)
         wst_raster = Raster(wst_data, geometry=geometry)
