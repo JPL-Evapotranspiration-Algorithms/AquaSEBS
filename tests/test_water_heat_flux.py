@@ -24,13 +24,6 @@ def test_water_heat_flux_etm_reference_values():
     windspeed_mps = np.array([3.0])
     SWnet = np.array([500.0])
 
-    # Hand-calculated ETM equations (Abdelrady et al., 2016, Eqs. 8-13):
-    # Tn = 0.5 * (20 - 10) = 5.0
-    # eta = 0.35 + 0.015 * 20 + 0.0012 * (5.0 ** 2) = 0.35 + 0.30 + 0.03 = 0.68
-    # S = 3.3 * 3.0 = 9.9
-    # beta = 4.5 + 0.05 * 20 + (0.68 + 0.47) * 9.9 = 4.5 + 1.0 + 11.385 = 16.885
-    # Te = 10.0 + (500.0 / 16.885) = 39.61208172934557
-    # W_Wm2 = 16.885 * (39.61208172934557 - 20.0) = 331.15
     expected_Tn = 5.0
     expected_eta = 0.68
     expected_S = 9.9
@@ -55,13 +48,7 @@ def test_water_heat_flux_etm_reference_values():
 
 
 def test_water_heat_flux_sign_and_equilibrium_conditions():
-    """
-    Verify physical sign behavior:
-    - Daytime warming (Te > WST_C) produces positive W_Wm2 (heat storage).
-    - Nocturnal cooling (Te < WST_C, e.g., SWnet = 0) produces negative W_Wm2 (heat release).
-    - Thermal equilibrium identity W = beta * (Te - WST_C).
-    """
-    # Daytime warming
+    """Verify physical sign behavior for daytime warming, nocturnal cooling, and equilibrium."""
     day = water_heat_flux(
         WST_C=np.array([18.0]),
         Td_C=np.array([12.0]),
@@ -72,7 +59,6 @@ def test_water_heat_flux_sign_and_equilibrium_conditions():
     assert day["Te"][0] > 18.0
     assert day["W_Wm2"][0] > 0.0
 
-    # Nighttime / low-radiation cooling (preserves negative flux without clipping)
     night = water_heat_flux(
         WST_C=np.array([22.0]),
         Td_C=np.array([8.0]),
@@ -83,7 +69,6 @@ def test_water_heat_flux_sign_and_equilibrium_conditions():
     assert np.isclose(night["Te"][0], 8.0)
     assert night["W_Wm2"][0] < 0.0
 
-    # Algebraic identity check at updated surface temperature
     eq_temp = float(day["Te"][0])
     eq_res = water_heat_flux(
         WST_C=np.array([eq_temp]),
@@ -118,6 +103,7 @@ def test_water_heat_flux_2d_array_and_return_keys():
         "RH",
         "Td_C",
         "windspeed_mps",
+        "high_wind_flag",
         "SWnet",
         "Tn",
         "η",
@@ -130,6 +116,79 @@ def test_water_heat_flux_2d_array_and_return_keys():
     for key in ("Tn", "η", "S", "β", "Te", "W_Wm2"):
         assert out[key].shape == shape
         assert np.all(np.isfinite(out[key]))
+
+
+def test_dewpoint_methods_linear_default_and_magnus_tetens_opt_in():
+    """Verify linear default parity and Magnus-Tetens opt-in psychrometric accuracy (Issue #12)."""
+    WST_C = np.array([22.0, 22.0, 22.0])
+    Ta_C = np.array([25.0, 25.0, 25.0])
+    RH = np.array([0.80, 0.50, 0.15])
+    windspeed_mps = np.array([3.0, 3.0, 3.0])
+    SWnet = np.array([500.0, 500.0, 500.0])
+
+    linear_out = water_heat_flux(
+        WST_C=WST_C,
+        Ta_C=Ta_C,
+        RH=RH,
+        windspeed_mps=windspeed_mps,
+        SWnet=SWnet,
+        mask_non_water_pixels=False,
+    )
+    expected_linear_Td = Ta_C - ((100.0 - RH * 100.0) / 5.0)
+    assert np.allclose(linear_out["Td_C"], expected_linear_Td, rtol=1e-12)
+
+    mt_out = water_heat_flux(
+        WST_C=WST_C,
+        Ta_C=Ta_C,
+        RH=RH,
+        windspeed_mps=windspeed_mps,
+        SWnet=SWnet,
+        dewpoint_method="magnus_tetens",
+        mask_non_water_pixels=False,
+    )
+    a, b = 17.625, 243.04
+    gamma_m = np.log(RH) + (a * Ta_C) / (b + Ta_C)
+    expected_mt_Td = (b * gamma_m) / (a - gamma_m)
+    assert np.allclose(mt_out["Td_C"], expected_mt_Td, rtol=1e-12)
+    # In arid air (RH = 0.15), linear rule-of-thumb gives 8.0 C whereas Magnus-Tetens gives ~-3.4 C
+    assert mt_out["Td_C"][2] < 0.0
+
+    # Boundary clamping at RH = 0.0
+    zero_rh_out = water_heat_flux(
+        WST_C=np.array([20.0]),
+        Ta_C=np.array([25.0]),
+        RH=np.array([0.0]),
+        windspeed_mps=np.array([3.0]),
+        SWnet=np.array([500.0]),
+        dewpoint_method="magnus_tetens",
+        mask_non_water_pixels=False,
+    )
+    assert np.all(np.isfinite(zero_rh_out["Td_C"]))
+
+    with pytest.raises(ValueError, match="dewpoint_method"):
+        water_heat_flux(
+            WST_C=np.array([20.0]),
+            Ta_C=np.array([25.0]),
+            RH=np.array([0.5]),
+            windspeed_mps=np.array([3.0]),
+            SWnet=np.array([500.0]),
+            dewpoint_method="invalid_method",
+            mask_non_water_pixels=False,
+        )
+
+
+def test_high_wind_diagnostic_flag():
+    """Verify high_wind_flag marks windspeed_mps > 7.5 without altering flux values (Issue #13)."""
+    windspeed_mps = np.array([3.0, 7.5, 7.51, 11.2])
+    out = water_heat_flux(
+        WST_C=np.full(4, 20.0),
+        Td_C=np.full(4, 10.0),
+        windspeed_mps=windspeed_mps,
+        SWnet=np.full(4, 500.0),
+        mask_non_water_pixels=False,
+    )
+    assert np.array_equal(out["high_wind_flag"], np.array([False, False, True, True]))
+    assert np.all(np.isfinite(out["W_Wm2"]))
 
 
 @pytest.mark.parametrize(

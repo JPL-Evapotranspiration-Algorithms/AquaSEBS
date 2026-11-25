@@ -29,6 +29,7 @@ Primary References:
 """
 
 from typing import Union, Dict
+import logging
 import numpy as np
 from datetime import datetime
 import rasters as rt
@@ -37,8 +38,25 @@ from NASADEM import NASADEM
 from GEOS5FP import GEOS5FP
 from check_distribution import check_distribution
 
-from .constants import RESAMPLING_METHOD, MASK_NON_WATER_PIXELS
+from .constants import (
+    RESAMPLING_METHOD,
+    MASK_NON_WATER_PIXELS,
+    DEWPOINT_METHOD,
+    HIGH_WIND_THRESHOLD_MPS,
+)
 from .exceptions import MissingOfflineParameter
+
+logger = logging.getLogger(__name__)
+
+
+def _nan_like(template: Union[Raster, np.ndarray]) -> Union[Raster, np.ndarray]:
+    """Create an all-NaN array or Raster matching the shape, dtype, and geometry of `template`."""
+    arr = np.asarray(template)
+    dtype = arr.dtype if np.issubdtype(arr.dtype, np.floating) else np.float32
+    nan_arr = np.full(arr.shape, np.nan, dtype=dtype)
+    if isinstance(template, Raster):
+        return Raster(nan_arr, geometry=template.geometry)
+    return nan_arr
 
 
 def water_heat_flux(
@@ -56,6 +74,7 @@ def water_heat_flux(
         GEOS5FP_connection: GEOS5FP = None,
         resampling: str = RESAMPLING_METHOD,
         mask_non_water_pixels: bool = MASK_NON_WATER_PIXELS,
+        dewpoint_method: str = DEWPOINT_METHOD,
         offline_mode: bool = False) -> Dict[str, Union[Raster, np.ndarray, float]]:
     """
     Calculate instantaneous water heat flux (`W_Wm2`) using the AquaSEBS
@@ -104,10 +123,16 @@ def water_heat_flux(
           (`Td_C`), and (3) wind speed (`windspeed_mps`). Thermal sensors with
           accuracy < 0.3 K are recommended (Abdelrady et al., 2016, Section 5).
         - **Dew-Point Approximation**: When `Td_C` is omitted, it is estimated
-          from `Ta_C` and `RH` via `Td_C = Ta_C - ((100 - RH * 100) / 5.0)`.
-          This linear approximation is most accurate at moderate-to-high relative
-          humidity (RH > 50%) and diverges under very arid conditions (tracked in
-          Issue #12).
+          from `Ta_C` and `RH` using either `dewpoint_method="linear"` (default,
+          `Td_C = Ta_C - ((100 - RH * 100) / 5.0)`, preserving ECOSTRESS
+          Collection 3 baseline parity) or `dewpoint_method="magnus_tetens"`
+          (WMO Magnus-Tetens saturation vapor pressure formula, recommended
+          under arid conditions where RH < 50%).
+        - **High-Wind Regime Shift**: Instantaneous open-water evaporation shifts
+          from radiatively controlled to aerodynamically controlled above
+          `HIGH_WIND_THRESHOLD_MPS = 7.5` m s^-1 (Fisher et al., 2023).
+          A boolean `"high_wind_flag"` mask (`windspeed_mps > 7.5`) is returned
+          as diagnostic metadata without modifying flux values.
         - **Bathymetry & Mixing Depth**: ETM does not explicitly parameterize
           water column depth or vertical mixing layer thickness, which governs
           diurnal heat storage hysteresis in shallow lakes versus deep oceans
@@ -154,19 +179,25 @@ def water_heat_flux(
             GEOS-5 FP grids onto `geometry`. Defaults to `RESAMPLING_METHOD` ("cubic").
         mask_non_water_pixels (bool, optional): If True, masks non-water pixels in
             `WST_C` to NaN using the `water` mask so land pixels are excluded from
-            ETM outputs. Defaults to `MASK_NON_WATER_PIXELS` (True).
+            ETM outputs. If no finite water pixels remain after masking, returns
+            geometry-matched NaN outputs without raising `BlankOutputError`.
+            Defaults to `MASK_NON_WATER_PIXELS` (True).
+        dewpoint_method (str, optional): Method for estimating `Td_C` from `Ta_C`
+            and `RH` when `Td_C` is omitted: `"linear"` (default, Collection 3
+            baseline) or `"magnus_tetens"`. Defaults to `DEWPOINT_METHOD` ("linear").
         offline_mode (bool, optional): If True, disables network retrievals from
             GEOS-5 FP and NASADEM, raising `MissingOfflineParameter` if required
             inputs are missing. Defaults to False.
 
     Returns:
         Dict[str, Union[Raster, np.ndarray, float]]: Dictionary containing masked
-        inputs, intermediate ETM parameters, and water heat flux:
+        inputs, intermediate ETM parameters, diagnostics, and water heat flux:
             - `WST_C`: Water surface temperature (°C) (masked to water if enabled).
             - `Ta_C`: Air temperature (°C) (or None if `Td_C` was given directly).
             - `RH`: Relative humidity fraction (0-1) (or None if `Td_C` was given).
             - `Td_C`: Dew-point temperature (°C).
             - `windspeed_mps`: Wind speed (m s^-1).
+            - `high_wind_flag`: Boolean mask where `windspeed_mps > 7.5` m s^-1.
             - `SWnet`: Net shortwave radiation (W m^-2).
             - `Tn`: Half temperature gradient `0.5 * (WST_C - Td_C)` (°C).
             - `η`: Dimensionless evaporation efficiency.
@@ -177,7 +208,7 @@ def water_heat_flux(
 
     Raises:
         ValueError: If `WST_C`, `Td_C`, `windspeed_mps`, or `SWnet` cannot be
-            resolved when `offline_mode=False` (e.g., missing `geometry`/`time_UTC`).
+            resolved when `offline_mode=False`, or if `dewpoint_method` is invalid.
         MissingOfflineParameter: If `offline_mode=True` and required inputs
             (`water` when masking, `Ta_C`, `RH`, `windspeed_mps`, `SWin_Wm2`,
             or `albedo`) are omitted.
@@ -200,6 +231,11 @@ def water_heat_flux(
         if GEOS5FP_connection is None:
             GEOS5FP_connection = GEOS5FP()
         return GEOS5FP_connection
+
+    if dewpoint_method not in ("linear", "magnus_tetens"):
+        raise ValueError(
+            f"unsupported dewpoint_method: {dewpoint_method!r} (expected 'linear' or 'magnus_tetens')"
+        )
 
     # Infer spatial grid geometry from the thermal water surface temperature Raster
     # when an explicit RasterGeometry is not supplied
@@ -230,6 +266,33 @@ def water_heat_flux(
         # Apply open-water mask by setting non-water pixels to NaN; NaNs propagate
         # cleanly through all downstream ETM equations
         WST_C = rt.where(water, WST_C, np.nan)
+
+    # Gracefully handle land-only tiles or scenes where all open-water pixels are
+    # cloud-obscured (zero finite water pixels remain after masking) so callers
+    # such as JET3 do not abort with BlankOutputError on valid terrestrial scenes
+    if not np.any(np.isfinite(np.asarray(WST_C))):
+        logger.warning("no valid unmasked water pixels present; returning NaN water heat flux outputs")
+        nan_output = _nan_like(WST_C)
+        high_wind_flag = (
+            windspeed_mps > HIGH_WIND_THRESHOLD_MPS
+            if windspeed_mps is not None
+            else np.zeros(np.asarray(WST_C).shape, dtype=bool)
+        )
+        return {
+            "WST_C": WST_C,
+            "Ta_C": Ta_C,
+            "RH": RH,
+            "Td_C": Td_C if Td_C is not None else _nan_like(WST_C),
+            "windspeed_mps": windspeed_mps if windspeed_mps is not None else _nan_like(WST_C),
+            "high_wind_flag": high_wind_flag,
+            "SWnet": SWnet if SWnet is not None else _nan_like(WST_C),
+            "Tn": _nan_like(WST_C),
+            "η": _nan_like(WST_C),
+            "S": _nan_like(WST_C),
+            "β": _nan_like(WST_C),
+            "Te": _nan_like(WST_C),
+            "W_Wm2": nan_output,
+        }
 
     # Estimate near-surface air dew-point temperature (Td_C) from air temperature
     # and relative humidity if Td_C is not provided directly; Td_C sets the lower
@@ -263,9 +326,17 @@ def water_heat_flux(
             check_distribution(RH, "RH")
 
         if Ta_C is not None and RH is not None:
-            # Approximate dew-point temperature (°C) using the standard linear psychrometric
-            # rule-of-thumb: Td ≈ Ta - ((100 - RH%) / 5), where RH% = RH * 100
-            Td_C = Ta_C - ((100 - RH * 100) / 5.0)
+            if dewpoint_method == "linear":
+                # Approximate dew-point temperature (°C) using the standard linear psychrometric
+                # rule-of-thumb: Td ≈ Ta - ((100 - RH%) / 5), where RH% = RH * 100
+                Td_C = Ta_C - ((100 - RH * 100) / 5.0)
+            elif dewpoint_method == "magnus_tetens":
+                # WMO / Alduchov & Eskridge (1996) Magnus-Tetens saturation vapor pressure formula
+                a = 17.625
+                b = 243.04
+                rh_clipped = np.clip(RH, 1e-6, 1.0)
+                gamma_m = np.log(rh_clipped) + (a * Ta_C) / (b + Ta_C)
+                Td_C = (b * gamma_m) / (a - gamma_m)
 
     if Td_C is None:
         raise ValueError("dew-point temperature (Td_C) not given")
@@ -280,7 +351,9 @@ def water_heat_flux(
         if offline_mode:
             raise MissingOfflineParameter("offline mode is enabled but windspeed_mps is not provided")
         if geometry is not None and time_UTC is not None:
-            windspeed_mps = _get_geos5fp().wind_speed(
+            geos5fp = _get_geos5fp()
+            wind_fn = getattr(geos5fp, "wind_speed_mps", None) or getattr(geos5fp, "wind_speed")
+            windspeed_mps = wind_fn(
                 time_UTC=time_UTC,
                 geometry=geometry,
                 resampling=resampling
@@ -290,6 +363,7 @@ def water_heat_flux(
         raise ValueError("wind-speed (windspeed_mps) not given")
 
     check_distribution(windspeed_mps, "windspeed_mps")
+    high_wind_flag = windspeed_mps > HIGH_WIND_THRESHOLD_MPS
 
     # Derive net shortwave solar radiation absorbed by the water surface:
     #   SWnet = SWin_Wm2 * (1 - albedo)
@@ -377,6 +451,7 @@ def water_heat_flux(
         "RH": RH,
         "Td_C": Td_C,
         "windspeed_mps": windspeed_mps,
+        "high_wind_flag": high_wind_flag,
         "SWnet": SWnet,
         "Tn": Tn,
         "η": η,

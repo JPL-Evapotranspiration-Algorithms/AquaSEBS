@@ -37,8 +37,49 @@ def test_AquaSEBS_offline_energy_balance_matches_priestley_taylor():
     assert "LE_Wm2" in results
     assert "W_Wm2" in results
     assert "G_Wm2" in results
+    assert "salinity_reduction_factor" not in results
     assert np.allclose(results["epsilon"], expected_epsilon, rtol=1e-12)
     assert np.allclose(results["LE_Wm2"], expected_LE, rtol=1e-12)
+
+
+def test_AquaSEBS_salinity_correction_opt_in():
+    """Verify Turk (1970) salinity reduction factor scales LE_Wm2 when salinity_gL is given (Issue #11)."""
+    WST_C = np.array([[22.0, 22.0, 22.0]])
+    Ta_C = np.array([[25.0, 25.0, 25.0]])
+    Td_C = np.array([[14.0, 14.0, 14.0]])
+    windspeed_mps = np.array([[3.2, 3.2, 3.2]])
+    SWnet = np.array([[560.0, 560.0, 560.0]])
+    Rn_Wm2 = np.array([[510.0, 510.0, 510.0]])
+
+    fresh = AquaSEBS(
+        WST_C=WST_C,
+        Ta_C=Ta_C,
+        Td_C=Td_C,
+        windspeed_mps=windspeed_mps,
+        SWnet=SWnet,
+        Rn_Wm2=Rn_Wm2,
+        mask_non_water_pixels=False,
+        offline_mode=True,
+    )
+
+    # Freshwater (0 g/L), Open Ocean (34.7 g/L), Great Salt Lake (240 g/L)
+    salinity = np.array([[0.0, 34.7, 240.0]])
+    saline = AquaSEBS(
+        WST_C=WST_C,
+        Ta_C=Ta_C,
+        Td_C=Td_C,
+        windspeed_mps=windspeed_mps,
+        SWnet=SWnet,
+        Rn_Wm2=Rn_Wm2,
+        salinity_gL=salinity,
+        mask_non_water_pixels=False,
+        offline_mode=True,
+    )
+
+    expected_sigma = np.clip(1.025 - 0.0246 * np.exp(0.00879 * salinity), 0.0, 1.0)
+    assert "salinity_reduction_factor" in saline
+    assert np.allclose(saline["salinity_reduction_factor"], expected_sigma, rtol=1e-12)
+    assert np.allclose(saline["LE_Wm2"], fresh["LE_Wm2"] * expected_sigma, rtol=1e-12)
 
 
 def test_AquaSEBS_custom_alpha_and_gamma():
@@ -79,6 +120,7 @@ def test_AquaSEBS_precomputed_water_heat_flux_passthrough():
         Ta_C=Ta_C,
         Rn_Wm2=Rn_Wm2,
         W_Wm2=W_Wm2,
+        windspeed_mps=np.array([[9.0]]),
         mask_non_water_pixels=False,
         offline_mode=True,
     )
@@ -86,6 +128,7 @@ def test_AquaSEBS_precomputed_water_heat_flux_passthrough():
     assert np.allclose(results["G_Wm2"], W_Wm2)
     assert "Tn" not in results
     assert "LE_Wm2" in results
+    assert results["high_wind_flag"][0, 0]
 
 
 def test_AquaSEBS_verma_net_radiation_integration():

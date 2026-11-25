@@ -161,7 +161,7 @@ def test_offline_execution_makes_zero_network_calls(monkeypatch):
         def RH(self, *args, **kwargs):
             fail_network()
 
-        def wind_speed(self, *args, **kwargs):
+        def wind_speed_mps(self, *args, **kwargs):
             fail_network()
 
         def SWin(self, *args, **kwargs):
@@ -191,3 +191,34 @@ def test_offline_execution_makes_zero_network_calls(monkeypatch):
 
     assert np.all(np.isfinite(results["LE_Wm2"]))
     assert np.all(np.isfinite(results["W_Wm2"]))
+
+
+def test_water_heat_flux_uses_geos5fp_wind_speed_mps():
+    """Verify online windspeed lookup invokes GEOS5FP.wind_speed_mps (Issue #15)."""
+
+    class MockGEOS5FP:
+        def __init__(self):
+            self.called = False
+
+        def wind_speed_mps(self, time_UTC, geometry, resampling):
+            self.called = True
+            return np.full(geometry.shape, 4.2)
+
+    geometry = RasterGrid.from_bbox(
+        xmin=-120.0, ymin=35.0, xmax=-119.98, ymax=35.02, cell_size=0.01
+    )
+    mock_geos = MockGEOS5FP()
+
+    out = water_heat_flux(
+        WST_C=np.full(geometry.shape, 20.0),
+        Td_C=np.full(geometry.shape, 10.0),
+        SWnet=np.full(geometry.shape, 500.0),
+        geometry=geometry,
+        time_UTC=datetime(2023, 7, 15, 18, 0),
+        GEOS5FP_connection=mock_geos,
+        mask_non_water_pixels=False,
+        offline_mode=False,
+    )
+
+    assert mock_geos.called
+    assert np.allclose(out["windspeed_mps"], 4.2)

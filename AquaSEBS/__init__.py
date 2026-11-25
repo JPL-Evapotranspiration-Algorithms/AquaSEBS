@@ -1,7 +1,13 @@
 from .AquaSEBS import AquaSEBS
 from .water_heat_flux import water_heat_flux
 from .exceptions import MissingOfflineParameter
-from .constants import RESAMPLING_METHOD, MASK_NON_WATER_PIXELS, UPSCALE_TO_DAYLIGHT
+from .constants import (
+    RESAMPLING_METHOD,
+    MASK_NON_WATER_PIXELS,
+    UPSCALE_TO_DAYLIGHT,
+    DEWPOINT_METHOD,
+    HIGH_WIND_THRESHOLD_MPS,
+)
 from .version import __version__
 
 __author__ = "Gregory H. Halverson"
@@ -13,6 +19,8 @@ __all__ = [
     "RESAMPLING_METHOD",
     "MASK_NON_WATER_PIXELS",
     "UPSCALE_TO_DAYLIGHT",
+    "DEWPOINT_METHOD",
+    "HIGH_WIND_THRESHOLD_MPS",
     "__version__",
     "__author__",
     "__citation__",

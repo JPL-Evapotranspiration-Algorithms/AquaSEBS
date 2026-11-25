@@ -44,9 +44,15 @@ from priestley_taylor import epsilon_from_Ta_C, GAMMA_PA, PT_ALPHA, priestley_ta
 from verma_net_radiation import verma_net_radiation
 from daylight_evapotranspiration import daylight_ET_from_instantaneous_LE
 
-from .constants import RESAMPLING_METHOD, MASK_NON_WATER_PIXELS, UPSCALE_TO_DAYLIGHT
+from .constants import (
+    RESAMPLING_METHOD,
+    MASK_NON_WATER_PIXELS,
+    UPSCALE_TO_DAYLIGHT,
+    DEWPOINT_METHOD,
+    HIGH_WIND_THRESHOLD_MPS,
+)
 from .exceptions import MissingOfflineParameter
-from .water_heat_flux import water_heat_flux
+from .water_heat_flux import water_heat_flux, _nan_like
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +69,7 @@ def AquaSEBS(
         Rn_Wm2: Union[Raster, np.ndarray] = None,
         W_Wm2: Union[Raster, np.ndarray] = None,
         SWin_Wm2: Union[Raster, np.ndarray] = None,
+        salinity_gL: Union[Raster, np.ndarray, float] = None,
         geometry: RasterGeometry = None,
         time_UTC: datetime = None,
         water: Union[Raster, np.ndarray] = None,
@@ -72,6 +79,7 @@ def AquaSEBS(
         resampling: str = RESAMPLING_METHOD,
         upscale_to_daylight: bool = UPSCALE_TO_DAYLIGHT,
         mask_non_water_pixels: bool = MASK_NON_WATER_PIXELS,
+        dewpoint_method: str = DEWPOINT_METHOD,
         offline_mode: bool = False) -> Dict[str, Union[Raster, np.ndarray, float]]:
     """
     Estimate instantaneous and daylight open-water latent heat flux (evaporation)
@@ -96,30 +104,38 @@ def AquaSEBS(
            hypothetical equilibrium water temperature (Te) at which net air-water
            heat exchange vanishes and derives W = beta * (Te - WST_C).
         2. **Latent Heat Flux (LE)** via the energy-limited Priestley-Taylor
-           (1972) formulation adopted in ECOSTRESS Collection 2 and OpenET
+           (1972) formulation adopted in ECOSTRESS Collection 2/3 and OpenET
            (Fisher et al., 2023, Eq. 7):
 
                LE = alpha * (Delta / (Delta + gamma)) * (Rn - W)
 
            with default Priestley-Taylor coefficient alpha = 1.26 over open water
            where surface resistance is zero.
-        3. **Daylight Upscaling** (optional) via sinusoidal diurnal net radiation
+        3. **Optional Salinity Scaling** via Turk's (1970) empirical vapor-pressure
+           depression factor when `salinity_gL` is explicitly provided
+           (Abdelrady et al., 2016, Eqs. 19-20):
+
+               sigma = clip(1.025 - 0.0246 * exp(0.00879 * salinity_gL), 0.0, 1.0)
+
+        4. **Daylight Upscaling** (optional) via sinusoidal diurnal net radiation
            integration and constant evaporative fraction preservation between
            satellite overpass and daily daylight totals (Bisht et al., 2005;
            Fisher, 2018; Fisher et al., 2023).
 
     Scientific Caveats & Validation Benchmarks:
-        - **High-Wind Regime Shift (Issue #13)**: Across 19 global validation sites,
+        - **High-Wind Regime Shift**: Across 19 global validation sites,
           Fisher et al. (2023) found that instantaneous AquaSEBS accuracy degrades
           during high-wind events (u > 7.5 m s^-1 daily mean; r^2 drops from 0.71
           to 0.47, RMSE rises from 38% to 62% of mean) as evaporation shifts from
           radiatively controlled to atmospherically/aerodynamically controlled.
           Temporal integration to daily totals buffers this sensitivity (daily
-          RMSE = 1.2-1.5 mm day^-1).
-        - **Salinity (Issue #11)**: This function computes freshwater potential
-          evaporation. For saline or hypersaline waters, evaporation is reduced by
-          Raoult's law vapor-pressure depression (up to ~27% in the Great Salt Lake;
-          Abdelrady et al., 2016, Eqs. 19-20).
+          RMSE = 1.2-1.5 mm day^-1). A boolean `"high_wind_flag"` mask is
+          returned in the output dictionary whenever `windspeed_mps` is resolved.
+        - **Salinity**: By default (`salinity_gL=None`), this function computes
+          freshwater potential evaporation (matching ECOSTRESS Collection 3).
+          Supply `salinity_gL` (g L^-1) over marine or hypersaline water bodies
+          to apply Raoult's law vapor-pressure depression (up to ~27% in the
+          Great Salt Lake; Abdelrady et al., 2016, Eqs. 19-20).
         - **Thermal Sensitivity**: Water heat flux W is the primary source of
           propagated uncertainty and is most sensitive to water surface temperature
           WST_C (Abdelrady et al., 2016, Section 4.6).
@@ -160,6 +176,11 @@ def AquaSEBS(
         SWin_Wm2 (Union[Raster, np.ndarray], optional): Incoming solar (shortwave)
             radiation in Watts per square meter (W m^-2). Retrieved from GEOS-5 FP
             if omitted when computing `Rn_Wm2` or `SWnet` (when `offline_mode=False`).
+        salinity_gL (Union[Raster, np.ndarray, float], optional): Water salinity
+            in grams per liter (g L^-1). When `None` (default), freshwater potential
+            evaporation is computed without scaling (preserving ECOSTRESS Collection 3
+            baseline outputs). When provided, applies Turk's (1970) salinity
+            reduction factor `sigma`.
         geometry (RasterGeometry, optional): Spatial grid definition (`rasters.RasterGeometry`).
             Inferred automatically from `WST_C.geometry` when `WST_C` is a `Raster`.
         time_UTC (datetime, optional): UTC timestamp of the observation/overpass,
@@ -187,6 +208,9 @@ def AquaSEBS(
         mask_non_water_pixels (bool, optional): If True, masks non-water pixels to
             NaN using the `water` mask inside `water_heat_flux`. Defaults to
             `MASK_NON_WATER_PIXELS` (True).
+        dewpoint_method (str, optional): Method for estimating `Td_C` from `Ta_C`
+            and `RH` when `Td_C` is omitted: `"linear"` (default, Collection 3
+            baseline) or `"magnus_tetens"`. Defaults to `DEWPOINT_METHOD` ("linear").
         offline_mode (bool, optional): If True, disables network retrievals from
             GEOS-5 FP and NASADEM, raising `MissingOfflineParameter` if required
             inputs are missing. Defaults to False.
@@ -201,12 +225,17 @@ def AquaSEBS(
             - `G_Wm2`: Ground/water heat flux passed into Priestley-Taylor (W m^-2).
             - `Rn_Wm2`: Instantaneous net radiation (W m^-2).
             - `epsilon`: Psychrometric energy partitioning factor Delta / (Delta + gamma).
+            - `salinity_reduction_factor`: Turk (1970) salinity factor `sigma`
+              (included when `salinity_gL` is provided).
+            - `high_wind_flag`: Boolean mask where `windspeed_mps > 7.5` m s^-1
+              (included when `windspeed_mps` is resolved).
             - `Tn`, `η`, `S`, `β`, `Te`: Intermediate ETM parameters (when `W_Wm2`
               is computed internally).
 
     Raises:
         ValueError: If required inputs (`WST_C`, `Ta_C`, or `Rn_Wm2` when radiation
-            inputs are insufficient) cannot be resolved when `offline_mode=False`.
+            inputs are insufficient) cannot be resolved when `offline_mode=False`,
+            or if `dewpoint_method` is invalid.
         MissingOfflineParameter: If `offline_mode=True` and required meteorological,
             radiative, or water-mask inputs are not supplied.
 
@@ -339,13 +368,14 @@ def AquaSEBS(
             GEOS5FP_connection=GEOS5FP_connection,
             resampling=resampling,
             mask_non_water_pixels=mask_non_water_pixels,
+            dewpoint_method=dewpoint_method,
             offline_mode=offline_mode
         )
 
         W_Wm2 = water_heat_flux_results["W_Wm2"]
         results.update(water_heat_flux_results)
-
-    check_distribution(W_Wm2, "W_Wm2")
+    elif windspeed_mps is not None:
+        results["high_wind_flag"] = windspeed_mps > HIGH_WIND_THRESHOLD_MPS
 
     # Calculate the dimensionless psychrometric energy-partitioning ratio:
     #   epsilon = Delta / (Delta + gamma)
@@ -358,6 +388,26 @@ def AquaSEBS(
     )
 
     check_distribution(epsilon, "epsilon")
+    results["epsilon"] = epsilon
+
+    # Gracefully handle scenes with zero valid unmasked water pixels (all-NaN W_Wm2)
+    # so land-only or cloud-masked coastal tiles return NaN open-water outputs
+    # without raising BlankOutputError
+    if not np.any(np.isfinite(np.asarray(W_Wm2))):
+        logger.warning("no valid unmasked water pixels present; returning NaN AquaSEBS evaporation outputs")
+        nan_output = _nan_like(W_Wm2)
+        results["G_Wm2"] = nan_output
+        results["LE_potential_Wm2"] = _nan_like(W_Wm2)
+        results["LE_Wm2"] = _nan_like(W_Wm2)
+        if salinity_gL is not None:
+            sigma = np.clip(1.025 - 0.0246 * np.exp(0.00879 * salinity_gL), 0.0, 1.0)
+            results["salinity_reduction_factor"] = sigma
+        if upscale_to_daylight and time_UTC is not None:
+            results["LE_daylight_Wm2"] = _nan_like(W_Wm2)
+            results["ET_daylight_kg"] = _nan_like(W_Wm2)
+        return results
+
+    check_distribution(W_Wm2, "W_Wm2")
 
     # Compute instantaneous open-water latent heat flux (evaporation energy, W m^-2)
     # using the Priestley-Taylor (1972) equation with available energy (Rn_Wm2 - W_Wm2)
@@ -374,6 +424,15 @@ def AquaSEBS(
     )
 
     LE_Wm2 = priestley_taylor_results["LE_potential_Wm2"]
+
+    # Apply optional Turk (1970) salinity vapor-pressure reduction factor
+    # (Abdelrady et al., 2016, Eqs. 19-20) when salinity_gL is supplied
+    if salinity_gL is not None:
+        sigma = np.clip(1.025 - 0.0246 * np.exp(0.00879 * salinity_gL), 0.0, 1.0)
+        LE_Wm2 = LE_Wm2 * sigma
+        priestley_taylor_results["LE_potential_Wm2"] = LE_Wm2
+        results["salinity_reduction_factor"] = sigma
+
     check_distribution(LE_Wm2, "LE_Wm2")
     results.update(priestley_taylor_results)
     results["LE_Wm2"] = LE_Wm2
