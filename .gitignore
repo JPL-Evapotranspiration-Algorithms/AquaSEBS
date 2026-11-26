@@ -209,3 +209,4 @@ __marimo__/
 .vscode
 .DS_Store
 *repomix*
+*.patch
